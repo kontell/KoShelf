@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<settings>
+  <category label="Server">
+    <setting id="server_url" type="text" label="Server URL" default="http://localhost:13378"/>
+    <setting id="api_key" type="text" label="API Key" option="hidden"/>
+    <setting id="username" type="text" label="Username (if not using API key)"/>
+    <setting id="password" type="text" label="Password" option="hidden"/>
+  </category>
+  <category label="Playback">
+    <setting id="playback_speed" type="labelenum" label="Playback speed" values="0.8x|1.0x|1.2x|1.5x|1.8x|2.0x|2.5x|3.0x" default="1.0x"/>
+    <setting id="sync_interval" type="slider" label="Progress sync interval (seconds)" default="30" range="10,5,120"/>
+  </category>
+</settings>
