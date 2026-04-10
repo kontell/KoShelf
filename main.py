@@ -18,7 +18,10 @@ from abs_api import ABSClient
 
 ADDON = xbmcaddon.Addon()
 ADDON_ID = ADDON.getAddonInfo('id')
-HANDLE = int(sys.argv[1])
+try:
+    HANDLE = int(sys.argv[1])
+except (IndexError, ValueError):
+    HANDLE = -1
 BASE_URL = sys.argv[0]
 
 
@@ -124,7 +127,7 @@ def format_duration(seconds):
 # ── Route handlers ──
 
 def route_root(client):
-    """Root menu: Continue Listening + each library as a top-level entry."""
+    """Root menu: Continue Listening + libraries + settings."""
     # Continue Listening
     add_directory('[B]Continue Listening[/B]', action='continue_listening')
 
@@ -134,7 +137,18 @@ def route_root(client):
         add_directory(lib['name'], action='library', library_id=lib['id'],
                       media_type=lib['mediaType'])
 
+    # Settings
+    add_directory('[COLOR gray]Settings[/COLOR]', action='settings')
+
     xbmcplugin.endOfDirectory(HANDLE)
+
+
+def route_settings():
+    """Open addon settings dialog."""
+    ADDON.openSettings()
+
+    # After settings close, write the step file for inputstream.tempo
+    _write_step_file()
 
 
 def route_continue_listening(client):
@@ -504,7 +518,11 @@ def route_search(client, library_id, media_type):
 
 PROFILE_DIR = xbmcvfs.translatePath(ADDON.getAddonInfo('profile'))
 SESSION_FILE = os.path.join(PROFILE_DIR, 'session.json')
-TEMPO_FILE = os.path.join(PROFILE_DIR, 'tempo')
+SPEEDS_FILE = os.path.join(PROFILE_DIR, 'speeds.json')
+SLEEP_FILE = os.path.join(PROFILE_DIR, 'sleep_timer')
+# Standardised files shared with inputstream.tempo
+TEMPO_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo')
+STEP_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo_step')
 
 
 def _save_session(data):
@@ -514,9 +532,12 @@ def _save_session(data):
         json.dump(data, f)
 
 
-def _get_tempo():
-    """Get playback speed from settings, return as float."""
-    speed_str = ADDON.getSetting('playback_speed') or '1.0x'
+def _get_tempo(media_type='book'):
+    """Get default playback speed from settings for the given media type."""
+    if media_type == 'podcast':
+        speed_str = ADDON.getSetting('podcast_speed') or '1.0x'
+    else:
+        speed_str = ADDON.getSetting('book_speed') or '1.0x'
     try:
         return float(speed_str.rstrip('x'))
     except ValueError:
@@ -524,10 +545,57 @@ def _get_tempo():
 
 
 def _write_tempo(tempo):
-    """Write tempo value to file for inputstream.tempo runtime updates."""
-    os.makedirs(PROFILE_DIR, exist_ok=True)
+    """Write tempo value to the shared inputstream.tempo file."""
     with open(TEMPO_FILE, 'w') as f:
         f.write(str(tempo))
+
+
+def _write_step_file():
+    """Write speed step increment for inputstream.tempo's keyboard stepping.
+    If speed_mode is 'custom', writes the step value. Otherwise removes the file
+    so inputstream.tempo uses its built-in presets."""
+    mode = ADDON.getSetting('speed_mode') or 'Presets'
+    if mode == 'Custom increment':
+        step_str = ADDON.getSetting('speed_step') or '0.10'
+        try:
+            step = float(step_str)
+            with open(STEP_FILE, 'w') as f:
+                f.write(str(step))
+        except (ValueError, IOError):
+            pass
+    else:
+        try:
+            if os.path.exists(STEP_FILE):
+                os.remove(STEP_FILE)
+        except OSError:
+            pass
+
+
+def _load_book_speed(item_id):
+    """Load saved speed for a specific book. Returns None if not found."""
+    try:
+        if os.path.exists(SPEEDS_FILE):
+            with open(SPEEDS_FILE, 'r') as f:
+                speeds = json.load(f)
+                return speeds.get(item_id)
+    except Exception:
+        pass
+    return None
+
+
+def _save_book_speed(item_id, speed):
+    """Save speed for a specific book."""
+    speeds = {}
+    try:
+        if os.path.exists(SPEEDS_FILE):
+            with open(SPEEDS_FILE, 'r') as f:
+                speeds = json.load(f)
+    except Exception:
+        pass
+    speeds[item_id] = speed
+    os.makedirs(PROFILE_DIR, exist_ok=True)
+    with open(SPEEDS_FILE, 'w') as f:
+        json.dump(speeds, f)
 
 
 def _resolve_playback(client, item_id, episode_id=None):
@@ -561,12 +629,24 @@ def _resolve_playback(client, item_id, episode_id=None):
         'duration': duration,
         'start_time': start_time,
         'started_at': time.time(),
+        'chapters': session.get('chapters', []),
+        'media_metadata': {
+            'title': title,
+            'author': author_str,
+        },
     })
 
     track = tracks[0]
     url = client.stream_url(track['contentUrl'])
-    tempo = _get_tempo()
+
+    # Per-item speed takes priority over global setting
+    # For podcasts, speed is keyed by podcast item_id (shared across episodes)
+    media_type = session.get('mediaType', 'book')
+    use_per_item = ADDON.getSetting('per_book_speed') != 'false'
+    saved_speed = _load_book_speed(item_id) if use_per_item else None
+    tempo = saved_speed if saved_speed is not None else _get_tempo(media_type)
     _write_tempo(tempo)
+    _write_step_file()
 
     li = xbmcgui.ListItem(path=url)
     li.setArt({'thumb': cover_url, 'poster': cover_url})
@@ -646,6 +726,8 @@ def router():
         route_play_book(client, args['item_id'])
     elif action == 'play_episode':
         route_play_episode(client, args['item_id'], args['episode_id'])
+    elif action == 'settings':
+        route_settings()
 
 
 if __name__ == '__main__':

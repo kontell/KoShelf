@@ -1,4 +1,4 @@
-"""KoShelf - background service for playback progress sync and resume."""
+"""KoShelf - background service for playback progress sync, resume, and audiobook features."""
 
 import json
 import os
@@ -6,17 +6,22 @@ import time
 
 import xbmc
 import xbmcaddon
+import xbmcgui
 import xbmcvfs
 
 from abs_api import ABSClient
 
 ADDON = xbmcaddon.Addon()
-SESSION_FILE = os.path.join(xbmcvfs.translatePath(ADDON.getAddonInfo('profile')),
-                            'session.json')
+PROFILE_DIR = xbmcvfs.translatePath(ADDON.getAddonInfo('profile'))
+SESSION_FILE = os.path.join(PROFILE_DIR, 'session.json')
+SPEEDS_FILE = os.path.join(PROFILE_DIR, 'speeds.json')
+SLEEP_FILE = os.path.join(PROFILE_DIR, 'sleep_timer')
+TOKEN_FILE = os.path.join(PROFILE_DIR, 'token.json')
+TEMPO_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo')
+STEP_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo_step')
 
 
 def load_session():
-    """Read session info written by the plugin."""
     try:
         if os.path.exists(SESSION_FILE):
             with open(SESSION_FILE, 'r') as f:
@@ -27,7 +32,6 @@ def load_session():
 
 
 def clear_session():
-    """Remove the session file."""
     try:
         if os.path.exists(SESSION_FILE):
             os.remove(SESSION_FILE)
@@ -35,7 +39,26 @@ def clear_session():
         pass
 
 
-TOKEN_FILE = os.path.join(os.path.dirname(SESSION_FILE), 'token.json')
+def read_tempo():
+    try:
+        with open(TEMPO_FILE) as f:
+            return float(f.read().strip())
+    except Exception:
+        return 1.0
+
+
+def save_book_speed(item_id, speed):
+    speeds = {}
+    try:
+        if os.path.exists(SPEEDS_FILE):
+            with open(SPEEDS_FILE, 'r') as f:
+                speeds = json.load(f)
+    except Exception:
+        pass
+    speeds[item_id] = speed
+    os.makedirs(PROFILE_DIR, exist_ok=True)
+    with open(SPEEDS_FILE, 'w') as f:
+        json.dump(speeds, f)
 
 
 def get_client():
@@ -49,7 +72,6 @@ def get_client():
         return None
     if api_key:
         return ABSClient(server_url, api_key=api_key)
-    # Use cached token from main plugin
     try:
         if os.path.exists(TOKEN_FILE):
             with open(TOKEN_FILE, 'r') as f:
@@ -61,9 +83,73 @@ def get_client():
     return ABSClient(server_url, username=username, password=password)
 
 
+def find_chapter(chapters, current_time):
+    """Find the current chapter name given playback position in seconds."""
+    for ch in chapters:
+        if ch.get('start', 0) <= current_time < ch.get('end', 0):
+            return ch.get('title', '')
+    return ''
+
+
+class KoShelfMonitor(xbmc.Monitor):
+    """Detects addon settings changes and writes new tempo to the shared file."""
+
+    def __init__(self):
+        super().__init__()
+        self.settings_changed = False
+
+    def onSettingsChanged(self):
+        self.settings_changed = True
+
+
+def set_koshelf_properties(win, session_data, player, chapters):
+    """Update KoShelf-specific window properties during playback."""
+    try:
+        current_time = player.getTime()
+    except Exception:
+        current_time = 0
+
+    # Chapter display
+    chapter_name = find_chapter(chapters, current_time)
+    if chapter_name:
+        win.setProperty('KoShelf.ChapterName', chapter_name)
+
+    # Now playing info from session
+    meta = session_data.get('media_metadata', {})
+    if meta.get('title'):
+        win.setProperty('KoShelf.NowPlaying.Title', meta['title'])
+    if meta.get('author'):
+        win.setProperty('KoShelf.NowPlaying.Author', meta['author'])
+
+    # Sleep timer
+    try:
+        if os.path.exists(SLEEP_FILE):
+            with open(SLEEP_FILE) as f:
+                end_time = float(f.read().strip())
+            remaining = end_time - time.time()
+            if remaining <= 0:
+                player.stop()
+                os.remove(SLEEP_FILE)
+                win.clearProperty('KoShelf.SleepTimerRemaining')
+                xbmc.log('KoShelf: sleep timer expired, stopping playback', xbmc.LOGINFO)
+            else:
+                mins = int(remaining) // 60
+                secs = int(remaining) % 60
+                win.setProperty('KoShelf.SleepTimerRemaining', '{}:{:02d}'.format(mins, secs))
+    except Exception:
+        pass
+
+
+def clear_koshelf_properties(win):
+    for prop in ('KoShelf.ChapterName', 'KoShelf.NowPlaying.Title',
+                 'KoShelf.NowPlaying.Author', 'KoShelf.SleepTimerRemaining'):
+        win.clearProperty(prop)
+
+
 def run():
-    monitor = xbmc.Monitor()
+    monitor = KoShelfMonitor()
     player = xbmc.Player()
+    win = xbmcgui.Window(10000)
 
     sync_interval = 30
     try:
@@ -75,12 +161,41 @@ def run():
     last_sync = 0
     client = None
     seek_done = False
+    chapters = []
+    last_book_speed_save = 0
 
     xbmc.log('KoShelf service started', xbmc.LOGINFO)
 
     while not monitor.abortRequested():
         if monitor.waitForAbort(1):
             break
+
+        # Handle settings change — update tempo file if speed setting changed
+        if monitor.settings_changed:
+            monitor.settings_changed = False
+            try:
+                sync_interval = int(ADDON.getSetting('sync_interval'))
+            except (ValueError, TypeError):
+                pass
+            # Write step file for inputstream.tempo keyboard control
+            mode = ADDON.getSetting('speed_mode') or 'Presets'
+            if mode == 'Custom increment':
+                try:
+                    step = float(ADDON.getSetting('speed_step') or '0.10')
+                    with open(STEP_FILE, 'w') as f:
+                        f.write(str(step))
+                except (ValueError, IOError):
+                    pass
+            else:
+                try:
+                    if os.path.exists(STEP_FILE):
+                        os.remove(STEP_FILE)
+                except OSError:
+                    pass
+
+            # Note: book/podcast defaults are separate settings now.
+            # Speed changes during playback are handled by inputstream.tempo's
+            # keyboard shortcuts ([/]) which write directly to TEMPO_FILE.
 
         # Check if audio is playing
         if not player.isPlayingAudio():
@@ -103,7 +218,9 @@ def run():
                 active_session = None
                 client = None
                 seek_done = False
+                chapters = []
                 clear_session()
+                clear_koshelf_properties(win)
             continue
 
         # Audio is playing — check if we have a session to track
@@ -131,6 +248,7 @@ def run():
                     pass
 
             active_session = session_data
+            chapters = session_data.get('chapters', [])
             last_sync = time.time()
             client = get_client()
             seek_done = False
@@ -141,7 +259,6 @@ def run():
         if not seek_done:
             start_time = active_session.get('start_time', 0)
             if start_time > 5:
-                # Wait briefly for the player to stabilise before seeking
                 xbmc.sleep(500)
                 try:
                     player.seekTime(start_time)
@@ -153,8 +270,19 @@ def run():
             seek_done = True
             continue
 
-        # Periodic sync
+        # Update KoShelf window properties (chapter, now playing, sleep timer)
+        set_koshelf_properties(win, active_session, player, chapters)
+
+        # Save per-book speed periodically (every 10s, if changed)
         now = time.time()
+        if ADDON.getSetting('per_book_speed') != 'false' and now - last_book_speed_save > 10:
+            last_book_speed_save = now
+            item_id = active_session.get('item_id')
+            if item_id:
+                current_tempo = read_tempo()
+                save_book_speed(item_id, current_tempo)
+
+        # Periodic sync
         if now - last_sync < sync_interval:
             continue
 
@@ -181,6 +309,7 @@ def run():
         except Exception:
             pass
         clear_session()
+    clear_koshelf_properties(win)
 
     xbmc.log('KoShelf service stopped', xbmc.LOGINFO)
 

@@ -1,13 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <settings>
+  <category label="Playback">
+    <setting id="book_speed" type="labelenum" label="Default book speed" values="0.7x|0.8x|0.9x|1.0x|1.1x|1.2x|1.3x|1.5x|1.7x|2.0x|2.5x|3.0x" default="1.0x"/>
+    <setting id="podcast_speed" type="labelenum" label="Default podcast speed" values="0.7x|0.8x|0.9x|1.0x|1.1x|1.2x|1.3x|1.5x|1.7x|2.0x|2.5x|3.0x" default="1.0x"/>
+    <setting id="speed_mode" type="labelenum" label="Speed adjust mode (keyboard [/] keys)" values="Presets|Custom increment" default="Presets"/>
+    <setting id="speed_step" type="labelenum" label="Custom speed step" values="0.05|0.10|0.15|0.20|0.25" default="0.10"/>
+    <setting id="per_book_speed" type="bool" label="Remember speed per book/podcast" default="true"/>
+    <setting id="sync_interval" type="slider" label="Progress sync interval (seconds)" default="30" range="10,5,120"/>
+  </category>
   <category label="Server">
     <setting id="server_url" type="text" label="Server URL" default="http://localhost:13378"/>
     <setting id="api_key" type="text" label="API Key" option="hidden"/>
     <setting id="username" type="text" label="Username (if not using API key)"/>
     <setting id="password" type="text" label="Password" option="hidden"/>
-  </category>
-  <category label="Playback">
-    <setting id="playback_speed" type="labelenum" label="Playback speed" values="0.8x|1.0x|1.2x|1.5x|1.8x|2.0x|2.5x|3.0x" default="1.0x"/>
-    <setting id="sync_interval" type="slider" label="Progress sync interval (seconds)" default="30" range="10,5,120"/>
   </category>
 </settings>
