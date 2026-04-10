@@ -2,7 +2,7 @@
 
 The client is working, however seeking is broken.
 
-Kodi's audi player, PAPlayer doesn't support tempo (playback speed adjustment). 
+Kodi's audio player, PAPlayer doesn't support tempo (playback speed adjustment). 
 
 Video player does, but that requires syncing playback to display which has caused audio problems for me.
 
