@@ -10,4 +10,4 @@ Seeing that inputstream.ffmpegdirect has ffmpeg built-in, I figured that it coul
 
 Claude addded the capability easily, see the fork here: https://github.com/kontell/inputstream.tempo
 
-However seeking is broken, see a proposed solution here: https://github.com/xbmc/xbmc/pull/28163
+However seeking is broken, see a proposed solution here: https://github.com/xbmc/xbmc/pull/28179
