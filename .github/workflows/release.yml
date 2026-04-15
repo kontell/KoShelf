@@ -1,0 +1,56 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  app_id: plugin.audio.koshelf
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout addon
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build zip
+        run: ./build.sh --output "${{ github.workspace }}/artifacts"
+
+      - name: Get version and changelog
+        id: version
+        run: |
+          version=$(grep -oP '^\s+version="\K[^"]+' addon.xml)
+          echo "version=$version" >> $GITHUB_OUTPUT
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "tag=$GITHUB_REF_NAME" >> $GITHUB_OUTPUT
+          else
+            echo "tag=v$version" >> $GITHUB_OUTPUT
+          fi
+          # Extract latest changelog entry (first paragraph, blank-line terminated)
+          if [[ -f changelog.txt ]]; then
+            changes=$(awk -v RS= 'NR==1' changelog.txt)
+          else
+            changes="Release $version"
+          fi
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "changes<<$EOF" >> $GITHUB_OUTPUT
+          echo "$changes" >> $GITHUB_OUTPUT
+          echo "$EOF" >> $GITHUB_OUTPUT
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ env.app_id }} ${{ steps.version.outputs.version }}
+          body: ${{ steps.version.outputs.changes }}
+          draft: true
+          files: artifacts/*.zip

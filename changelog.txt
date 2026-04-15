@@ -1,0 +1,56 @@
+v0.10.5
+- Service-triggered KoShelf-root refresh when tempo sentinel appears/disappears
+  so the "Now playing" row appears without a manual re-entry.
+- Move Playback section to first in settings, ahead of General.
+- Tighten service loop to 0.25s for faster resume-seek latency.
+
+v0.10.4
+- Continue Listening default sort uses SORT_METHOD_NONE (server returns
+  items in last-played-descending order) and exposes LastPlayed, Title,
+  Artist, Duration as alternatives.
+- Progress percentage moved into the InfoTag title so it survives album-
+  style views that only show the tag title.
+- Add artist field to podcast items.
+- Cache root directory is invalidated (cacheToDisc=False) so the "Now
+  playing" row reappears on next root visit.
+
+v0.10.3
+- Drop setDateAdded from InfoTagMusic (it doesn't exist — only VideoTag has
+  one) and SORT_METHOD_DATEADDED from book sorts. Was crashing every
+  listing after the v0.10.0 sort/date additions.
+
+v0.10.2
+- Show a "Now playing: <title> — <speed>" item at the root when tempo is
+  the active inputstream; selecting it opens a speed picker.
+
+v0.10.1
+- Fix settings rendering for Kodi 21: sliders use <format>{:.2f}x</format>
+  inline instead of the formatlabel-with-id pattern, speed_step uses
+  type=string with option-label string IDs, and empty-default fields
+  declare <allowempty>true</allowempty>.
+
+v0.10.0
+- Add sort-order options to every browsing view (title, artist, album,
+  duration for books; last played/title/artist/duration for Continue
+  Listening; date/title/duration for podcast episodes).
+- Continue Listening defaults to last-played descending.
+- Drop API key auth; username + password only (cached session token
+  handled transparently).
+- Bind Up/Down to BigStepForward/BigStepBack in audio contexts for
+  progressive skip. (Moved out to inputstream.tempo's keymap in later
+  versions.)
+
+v0.9.1
+- Migrate settings.xml to Kodi 21's structured format with help text,
+  slider controls for speed ranges, and a Playback/General section split.
+- Speed step (spinner) + min/max/book/podcast speed sliders formatted
+  as "1.50x".
+- Clamp saved per-book speeds against the current min/max at replay.
+- Share step/min/max with inputstream.tempo via a JSON file in
+  special://temp/inputstream_tempo_config.
+- Drop the speed_mode setting — always step by speed_step now.
+- Skip ebook-only library items in both Continue Listening and regular
+  library listings.
+
+v0.9.0
+- Initial release through GitHub Actions.

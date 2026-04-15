@@ -7,9 +7,9 @@ import xbmc
 class ABSClient:
     """Client for the AudioBookShelf REST API."""
 
-    def __init__(self, server_url, api_key=None, username=None, password=None):
+    def __init__(self, server_url, token=None, username=None, password=None):
         self.server_url = server_url.rstrip('/')
-        self.token = api_key
+        self.token = token
         self.session = requests.Session()
         if not self.token and username and password:
             self._login(username, password)

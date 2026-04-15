@@ -19,6 +19,7 @@ SLEEP_FILE = os.path.join(PROFILE_DIR, 'sleep_timer')
 TOKEN_FILE = os.path.join(PROFILE_DIR, 'token.json')
 TEMPO_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo')
 CONFIG_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo_config')
+ACTIVE_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo_active')
 
 
 def _get_float(setting_id, default):
@@ -84,21 +85,16 @@ def save_book_speed(item_id, speed):
 
 def get_client():
     server_url = ADDON.getSetting('server_url')
-    api_key = ADDON.getSetting('api_key')
     username = ADDON.getSetting('username')
     password = ADDON.getSetting('password')
-    if not server_url:
+    if not server_url or not (username and password):
         return None
-    if not api_key and not (username and password):
-        return None
-    if api_key:
-        return ABSClient(server_url, api_key=api_key)
     try:
         if os.path.exists(TOKEN_FILE):
             with open(TOKEN_FILE, 'r') as f:
                 cached = json.load(f).get('token', '')
                 if cached:
-                    return ABSClient(server_url, api_key=cached)
+                    return ABSClient(server_url, token=cached)
     except Exception:
         pass
     return ABSClient(server_url, username=username, password=password)
@@ -184,6 +180,7 @@ def run():
     seek_done = False
     chapters = []
     last_book_speed_save = 0
+    last_active = False
 
     # Seed the shared tempo config so speed.py has min/max/step ready even
     # if the user triggers keys before opening playback from KoShelf.
@@ -191,9 +188,21 @@ def run():
 
     xbmc.log('KoShelf service started', xbmc.LOGINFO)
 
+    # 0.25s poll keeps the resume-seek latency down once the stream is ready,
+    # so the user hears as little of the pre-resume audio as possible.
     while not monitor.abortRequested():
-        if monitor.waitForAbort(1):
+        if monitor.waitForAbort(0.25):
             break
+
+        # When the sentinel appears or disappears, refresh a KoShelf listing
+        # if that's what the user is currently looking at — so the root shows
+        # the "Now playing" item without needing a manual re-entry.
+        active_now = os.path.exists(ACTIVE_FILE)
+        if active_now != last_active:
+            folder = xbmc.getInfoLabel('Container.FolderPath') or ''
+            if 'plugin.audio.koshelf' in folder:
+                xbmc.executebuiltin('Container.Refresh')
+            last_active = active_now
 
         # Handle settings change — refresh sync interval and tempo config.
         if monitor.settings_changed:
@@ -231,6 +240,11 @@ def run():
                 chapters = []
                 clear_session()
                 clear_koshelf_properties(win)
+                try:
+                    if os.path.exists(ACTIVE_FILE):
+                        os.remove(ACTIVE_FILE)
+                except OSError:
+                    pass
             continue
 
         # Audio is playing — check if we have a session to track

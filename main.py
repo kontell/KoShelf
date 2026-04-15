@@ -48,27 +48,22 @@ def _save_cached_token(token):
 
 def get_client():
     server_url = ADDON.getSetting('server_url')
-    api_key = ADDON.getSetting('api_key')
     username = ADDON.getSetting('username')
     password = ADDON.getSetting('password')
     if not server_url:
         xbmcgui.Dialog().ok('KoShelf', 'Please configure the server URL in addon settings.')
         ADDON.openSettings()
         return None
-    if not api_key and not (username and password):
-        xbmcgui.Dialog().ok('KoShelf', 'Please configure an API key or username/password in addon settings.')
+    if not (username and password):
+        xbmcgui.Dialog().ok('KoShelf', 'Please configure username and password in addon settings.')
         ADDON.openSettings()
         return None
-    # Use API key directly if available; otherwise use cached login token
-    if api_key:
-        return ABSClient(server_url, api_key=api_key)
+    # Try the cached session token first; login fresh if missing/expired.
     cached = _load_cached_token()
     if cached:
-        client = ABSClient(server_url, api_key=cached)
-        # Quick check the token still works
+        client = ABSClient(server_url, token=cached)
         if client.get_libraries():
             return client
-    # Token missing or expired — login fresh
     client = ABSClient(server_url, username=username, password=password)
     if client.token:
         _save_cached_token(client.token)
@@ -91,6 +86,19 @@ def add_directory(label, **kwargs):
     xbmcplugin.addDirectoryItem(HANDLE, url, li, isFolder=True)
 
 
+def _epoch_to_str(ms_or_s):
+    """ABS timestamps are usually epoch ms — convert to 'YYYY-MM-DD HH:MM:SS'."""
+    if not ms_or_s:
+        return ''
+    try:
+        val = float(ms_or_s)
+        if val > 1e12:  # ms
+            val /= 1000.0
+        return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(val))
+    except (ValueError, TypeError, OSError):
+        return ''
+
+
 def add_playable(label, url, art=None, info=None, progress=None):
     """Add a playable audio item."""
     li = xbmcgui.ListItem(label)
@@ -110,7 +118,51 @@ def add_playable(label, url, art=None, info=None, progress=None):
             tag.setDuration(int(info['duration']))
         if info.get('comment'):
             tag.setComment(info['comment'])
+        # InfoTagMusic has no setDateAdded; we drop added_at for music items.
+        # LastPlayed is supported — set it so SORT_METHOD_LASTPLAYED works.
+        last = _epoch_to_str(info.get('last_played'))
+        if last:
+            tag.setLastPlayed(last)
     xbmcplugin.addDirectoryItem(HANDLE, url, li, isFolder=False)
+
+
+# Sort menu presets — kept near the top so every route is consistent.
+_BOOK_SORTS = (
+    xbmcplugin.SORT_METHOD_TITLE,
+    xbmcplugin.SORT_METHOD_ARTIST,
+    xbmcplugin.SORT_METHOD_ALBUM,
+    xbmcplugin.SORT_METHOD_DURATION,
+    xbmcplugin.SORT_METHOD_NONE,
+)
+
+_CONTINUE_SORTS = (
+    # NONE first => items appear in the order ABS returns them (last played
+    # descending). Kodi can't default its own sort to descending from Python,
+    # so we rely on server order as the default.
+    xbmcplugin.SORT_METHOD_NONE,
+    xbmcplugin.SORT_METHOD_LASTPLAYED,
+    xbmcplugin.SORT_METHOD_TITLE,
+    xbmcplugin.SORT_METHOD_ARTIST,
+    xbmcplugin.SORT_METHOD_DURATION,
+)
+
+_EPISODE_SORTS = (
+    xbmcplugin.SORT_METHOD_TITLE,
+    xbmcplugin.SORT_METHOD_DURATION,
+    xbmcplugin.SORT_METHOD_NONE,
+)
+
+_NAME_SORTS = (
+    xbmcplugin.SORT_METHOD_LABEL,
+    xbmcplugin.SORT_METHOD_NONE,
+)
+
+
+def _apply_sorts(methods, content='albums'):
+    """Set content type and register the listed sort methods (first = default)."""
+    xbmcplugin.setContent(HANDLE, content)
+    for m in methods:
+        xbmcplugin.addSortMethod(HANDLE, m)
 
 
 def format_duration(seconds):
@@ -128,6 +180,15 @@ def format_duration(seconds):
 
 def route_root(client):
     """Root menu: Continue Listening + libraries + settings."""
+    # Now playing — only shown when tempo is the active inputstream. Lets the
+    # user open the speed picker without leaving the addon via remote.
+    if os.path.exists(ACTIVE_FILE):
+        win = xbmcgui.Window(10000)
+        title = win.getProperty('KoShelf.NowPlaying.Title') or 'current track'
+        speed = win.getProperty('InputstreamTempo.SpeedDisplay') or '1.0x'
+        label = '[B]Now playing[/B]: {}  [COLOR orange]{}[/COLOR]'.format(title, speed)
+        add_directory(label, action='speed_dialog')
+
     # Continue Listening
     add_directory('[B]Continue Listening[/B]', action='continue_listening')
 
@@ -140,7 +201,43 @@ def route_root(client):
     # Settings
     add_directory('[COLOR gray]Settings[/COLOR]', action='settings')
 
-    xbmcplugin.endOfDirectory(HANDLE)
+    # Don't cache the root so the "Now playing" row appears/disappears
+    # correctly when the user returns from playback.
+    xbmcplugin.endOfDirectory(HANDLE, cacheToDisc=False)
+
+
+def _format_speed(speed):
+    if abs(speed - round(speed, 1)) < 0.001:
+        return '{:.1f}x'.format(speed)
+    return '{:.2f}x'.format(speed)
+
+
+def route_speed_dialog():
+    """Show a speed picker and write the result to TEMPO_FILE.
+    Duplicates inputstream.tempo/speed.py dialog logic so the root menu entry
+    works without RunScript plumbing."""
+    if os.path.exists(ACTIVE_FILE):
+        step, lo, hi = _speed_config()
+        try:
+            with open(TEMPO_FILE) as f:
+                current = float(f.read().strip())
+        except (IOError, ValueError):
+            current = 1.0
+        count = int(round((hi - lo) / step))
+        values = [round(lo + i * step, 2) for i in range(count + 1)]
+        labels = [_format_speed(v) for v in values]
+        idx = min(range(len(values)), key=lambda i: abs(values[i] - current))
+        sel = xbmcgui.Dialog().select('Playback speed', labels, preselect=idx)
+        if sel >= 0 and abs(values[sel] - current) > 0.001:
+            new_speed = values[sel]
+            _write_tempo(new_speed)
+            win = xbmcgui.Window(10000)
+            win.setProperty('InputstreamTempo.Speed', str(new_speed))
+            win.setProperty('InputstreamTempo.SpeedDisplay', _format_speed(new_speed))
+            xbmc.executebuiltin(
+                'Notification(Playback Speed, {}, 1200)'.format(_format_speed(new_speed)))
+    # Don't change the directory view — stay at root.
+    xbmcplugin.endOfDirectory(HANDLE, succeeded=False, updateListing=False, cacheToDisc=False)
 
 
 def route_settings():
@@ -179,23 +276,24 @@ def route_continue_listening(client):
             progress_key = '{}-{}'.format(item_id, ep_id)
             ep_progress = all_progress.get(progress_key)
 
-            label = ep_title
-            if podcast_title:
-                label = '[B]{}[/B] - {}'.format(podcast_title, ep_title)
+            # Put progress in the title so it's visible in album-style views
+            # (label is often hidden there). Prefix keeps it readable.
+            display_title = ep_title
             if ep_progress:
                 pct = ep_progress.get('progress', 0) * 100
-                current = ep_progress.get('currentTime', 0)
-                label += '  [COLOR orange]{:.0f}% ({})[/COLOR]'.format(
-                    pct, format_duration(current))
+                display_title = '[{:.0f}%] {}'.format(pct, ep_title)
 
             info = {
-                'title': ep_title,
+                'title': display_title,
+                'artist': meta.get('author', ''),
                 'album': podcast_title,
                 'duration': duration,
+                'added_at': ep.get('addedAt') or ep.get('publishedAt'),
+                'last_played': (ep_progress or {}).get('lastUpdate'),
             }
             play_url = build_url(action='play_episode', item_id=item_id,
                                  episode_id=ep_id)
-            add_playable(label, play_url, art=art, info=info, progress=ep_progress)
+            add_playable(display_title, play_url, art=art, info=info, progress=ep_progress)
         else:
             # Book — skip ebook-only items (no audio)
             if media.get('numAudioFiles', 0) == 0 and not media.get('duration'):
@@ -204,25 +302,25 @@ def route_continue_listening(client):
             duration = media.get('duration', 0)
             item_progress = all_progress.get(item_id)
 
+            # Put progress in the title so album-style views (which show the
+            # InfoTag title, not the ListItem label) keep showing resume %.
+            display_title = title
+            if item_progress:
+                pct = item_progress.get('progress', 0) * 100
+                display_title = '[{:.0f}%] {}'.format(pct, title)
+
             info = {
-                'title': title,
+                'title': display_title,
                 'artist': meta.get('authorName', ''),
                 'album': meta.get('seriesName', ''),
                 'duration': duration,
+                'added_at': item.get('addedAt'),
+                'last_played': (item_progress or {}).get('lastUpdate'),
             }
-            narrator = meta.get('narratorName', '')
-            label = title
-            if narrator:
-                label += '  [I]{}[/I]'.format(narrator)
-            if item_progress:
-                pct = item_progress.get('progress', 0) * 100
-                current = item_progress.get('currentTime', 0)
-                label += '  [COLOR orange]{:.0f}% ({})[/COLOR]'.format(
-                    pct, format_duration(current))
-
             play_url = build_url(action='play_book', item_id=item_id)
-            add_playable(label, play_url, art=art, info=info, progress=item_progress)
+            add_playable(display_title, play_url, art=art, info=info, progress=item_progress)
 
+    _apply_sorts(_CONTINUE_SORTS)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -257,9 +355,10 @@ def route_library_items(client, library_id, media_type, page=0):
 
     results = data.get('results', [])
     total = data.get('total', 0)
+    progress_map = client.get_all_progress()
 
     for item in results:
-        _add_library_item(client, item, media_type, library_id)
+        _add_library_item(client, item, media_type, library_id, progress_map)
 
     # Next page
     if (page + 1) * limit < total:
@@ -268,16 +367,18 @@ def route_library_items(client, library_id, media_type, page=0):
             action='library_items', library_id=library_id,
             media_type=media_type, page=page + 1)
 
+    _apply_sorts(_BOOK_SORTS)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
-def _add_library_item(client, item, media_type, library_id):
+def _add_library_item(client, item, media_type, library_id, progress_map=None):
     """Add a single book or podcast to the directory listing."""
     media = item.get('media', {})
     meta = media.get('metadata', {})
     title = meta.get('title', 'Unknown')
     art = {'thumb': client.cover_url(item['id']),
            'poster': client.cover_url(item['id'])}
+    progress = (progress_map or {}).get(item['id']) if progress_map else None
 
     if media_type == 'podcast':
         num_eps = media.get('numEpisodes', 0)
@@ -305,6 +406,8 @@ def _add_library_item(client, item, media_type, library_id):
             'album': meta.get('seriesName', ''),
             'duration': duration,
             'comment': meta.get('description', ''),
+            'added_at': item.get('addedAt'),
+            'last_played': (progress or {}).get('lastUpdate'),
         }
         play_url = build_url(action='play_book', item_id=item['id'])
         add_playable(label, play_url, art=art, info=info)
@@ -332,6 +435,7 @@ def route_series_list(client, library_id, page=0):
         add_directory('[COLOR yellow]Next page[/COLOR]',
                       action='series_list', library_id=library_id, page=page + 1)
 
+    _apply_sorts(_NAME_SORTS, content='files')
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -341,8 +445,10 @@ def route_series_detail(client, library_id, series_id):
     filter_str = 'series.' + b64encode(series_id.encode()).decode()
     data = client.get_library_items(library_id, limit=100, filter_str=filter_str)
     if data:
+        progress_map = client.get_all_progress()
         for item in data.get('results', []):
-            _add_library_item(client, item, 'book', library_id)
+            _add_library_item(client, item, 'book', library_id, progress_map)
+    _apply_sorts(_BOOK_SORTS)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -364,6 +470,7 @@ def route_authors_list(client, library_id):
             li.setArt(art)
         xbmcplugin.addDirectoryItem(HANDLE, url, li, isFolder=True)
 
+    _apply_sorts(_NAME_SORTS, content='files')
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -373,8 +480,10 @@ def route_author_books(client, library_id, author_id, author_name):
     filter_str = 'authors.' + b64encode(author_id.encode()).decode()
     data = client.get_library_items(library_id, limit=100, filter_str=filter_str)
     if data:
+        progress_map = client.get_all_progress()
         for item in data.get('results', []):
-            _add_library_item(client, item, 'book', library_id)
+            _add_library_item(client, item, 'book', library_id, progress_map)
+    _apply_sorts(_BOOK_SORTS)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -387,16 +496,18 @@ def route_collections_list(client, library_id):
         label = '{}  [COLOR gray]{} books[/COLOR]'.format(name, len(books))
         add_directory(label, action='collection_detail',
                       library_id=library_id, collection_id=col['id'])
+    _apply_sorts(_NAME_SORTS, content='files')
     xbmcplugin.endOfDirectory(HANDLE)
 
 
 def route_collection_detail(client, library_id, collection_id):
     """Show books in a collection."""
-    from abs_api import ABSClient
     data = client._get('/api/collections/{}'.format(collection_id))
     if data:
+        progress_map = client.get_all_progress()
         for item in data.get('books', []):
-            _add_library_item(client, item, 'book', library_id)
+            _add_library_item(client, item, 'book', library_id, progress_map)
+    _apply_sorts(_BOOK_SORTS)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -431,11 +542,13 @@ def route_podcast_episodes(client, item_id, library_id):
             'album': podcast_title,
             'duration': duration,
             'comment': ep.get('description', ''),
+            'added_at': ep.get('addedAt') or ep.get('publishedAt'),
         }
         play_url = build_url(action='play_episode', item_id=item_id,
                              episode_id=ep['id'])
         add_playable(label, play_url, art=art, info=info)
 
+    _apply_sorts(_EPISODE_SORTS)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -467,11 +580,13 @@ def route_recent_episodes(client, library_id):
             'title': ep_title,
             'album': podcast_title,
             'duration': duration,
+            'added_at': ep.get('addedAt') or ep.get('publishedAt'),
         }
         play_url = build_url(action='play_episode', item_id=item_id,
                              episode_id=ep_id)
         add_playable(label, play_url, art=art, info=info)
 
+    _apply_sorts(_EPISODE_SORTS)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -493,10 +608,11 @@ def route_search(client, library_id, media_type):
         xbmcplugin.endOfDirectory(HANDLE)
         return
 
+    progress_map = client.get_all_progress()
     if media_type == 'book':
         for entry in data.get('book', []):
             item = entry.get('libraryItem', entry)
-            _add_library_item(client, item, 'book', library_id)
+            _add_library_item(client, item, 'book', library_id, progress_map)
         for entry in data.get('series', []):
             series = entry.get('series', entry)
             name = series.get('name', 'Unknown')
@@ -513,8 +629,9 @@ def route_search(client, library_id, media_type):
     elif media_type == 'podcast':
         for entry in data.get('podcast', []):
             item = entry.get('libraryItem', entry)
-            _add_library_item(client, item, 'podcast', library_id)
+            _add_library_item(client, item, 'podcast', library_id, progress_map)
 
+    _apply_sorts(_BOOK_SORTS if media_type == 'book' else _NAME_SORTS)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -527,6 +644,7 @@ SLEEP_FILE = os.path.join(PROFILE_DIR, 'sleep_timer')
 # Standardised files shared with inputstream.tempo
 TEMPO_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo')
 CONFIG_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo_config')
+ACTIVE_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo_active')
 
 
 def _save_session(data):
@@ -660,6 +778,13 @@ def _resolve_playback(client, item_id, episode_id=None):
     tempo = round(_clamp(raw_tempo, lo, hi), 2)
     _write_tempo(tempo)
     _write_config_file()
+    # Sentinel — tells inputstream.tempo keys/dialog they can act. Service
+    # clears this on playback stop, so non-tempo playback gets a no-op.
+    try:
+        with open(ACTIVE_FILE, 'w') as f:
+            f.write(item_id)
+    except IOError:
+        pass
 
     li = xbmcgui.ListItem(path=url)
     li.setArt({'thumb': cover_url, 'poster': cover_url})
@@ -741,6 +866,8 @@ def router():
         route_play_episode(client, args['item_id'], args['episode_id'])
     elif action == 'settings':
         route_settings()
+    elif action == 'speed_dialog':
+        route_speed_dialog()
 
 
 if __name__ == '__main__':

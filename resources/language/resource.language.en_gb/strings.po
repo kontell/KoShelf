@@ -117,20 +117,12 @@ msgctxt "#30111"
 msgid "Full URL of your AudioBookShelf server, including protocol and port (e.g. https://books.example.com)."
 msgstr ""
 
-msgctxt "#30120"
-msgid "API key"
-msgstr ""
-
-msgctxt "#30121"
-msgid "Long-lived API token. Preferred over username/password — create one in the AudioBookShelf web UI under Users."
-msgstr ""
-
 msgctxt "#30130"
 msgid "Username"
 msgstr ""
 
 msgctxt "#30131"
-msgid "Used only if no API key is set. KoShelf logs in and caches a session token."
+msgid "Your AudioBookShelf account name. KoShelf logs in and caches a session token."
 msgstr ""
 
 msgctxt "#30140"
@@ -138,5 +130,5 @@ msgid "Password"
 msgstr ""
 
 msgctxt "#30141"
-msgid "Used only if no API key is set."
+msgid "Your AudioBookShelf account password."
 msgstr ""

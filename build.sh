@@ -3,7 +3,11 @@ set -euo pipefail
 
 ADDON_ID="plugin.audio.koshelf"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Override with --output <dir> (used by CI); default keeps the old local path.
 BUILD_DIR="${SCRIPT_DIR}/../builds"
+if [[ "${1:-}" == "--output" ]]; then
+    BUILD_DIR="$2"
+fi
 
 # Extract version from addon.xml (matches the addon element's version attribute)
 VERSION=$(grep -oP '^\s+version="\K[^"]+' "$SCRIPT_DIR/addon.xml")
