@@ -1,6 +1,4 @@
-### Kodi client for AudioBookShelf
-
-The client is working, however seeking is broken.
+# Kodi client for AudioBookShelf
 
 Kodi's audio player, PAPlayer doesn't support tempo (playback speed adjustment). 
 
@@ -10,4 +8,22 @@ Seeing that inputstream.ffmpegdirect has ffmpeg built-in, I figured that it coul
 
 Claude addded the capability easily, see the fork here: https://github.com/kontell/inputstream.tempo
 
-However seeking is broken, see a proposed solution here: https://github.com/xbmc/xbmc/pull/28179
+However seeking was broken, see the fix here: https://github.com/xbmc/xbmc/pull/28179
+
+## Installation
+
+This can now be tested by:
+  - Installing a PR build of Kodi from here: https://jenkins.kodi.tv/job/BuildMulti-PR/37970/
+  - Installing the Kontell repository:
+      - Installing inputstream.tempo
+      - KoShelf
+
+## Supported platforms
+
+| Platform | Kodi 21 (Omega) | Kodi 22 (Piers) |
+|----------|----------------|-----------------|
+| Linux x86_64 | yes | yes |
+| Linux armv7 (Pi 2+) | yes | yes |
+| Linux aarch64 (Pi 3+) | yes | yes |
+| Android ARM32 | yes | yes |
+| Android ARM64 | yes | yes |
