@@ -27,6 +27,7 @@ cp "$SCRIPT_DIR/abs_api.py" "$DEST/"
 cp "$SCRIPT_DIR/service.py" "$DEST/"
 cp "$SCRIPT_DIR/resources/settings.xml" "$DEST/resources/"
 cp "$SCRIPT_DIR/resources/icon.png" "$DEST/resources/"
+cp -r "$SCRIPT_DIR/resources/language" "$DEST/resources/"
 
 # Syntax check
 python3 -c "

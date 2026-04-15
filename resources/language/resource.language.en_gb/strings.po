@@ -1,0 +1,142 @@
+# KoShelf — English (en_GB) language strings.
+msgid ""
+msgstr ""
+"Project-Id-Version: KoShelf\n"
+"Report-Msgid-Bugs-To: https://github.com/kontell/koshelf/issues\n"
+"POT-Creation-Date: 2026-04-15\n"
+"Language: en_gb\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# Categories
+msgctxt "#30000"
+msgid "Playback"
+msgstr ""
+
+msgctxt "#30001"
+msgid "Speed limits, step increments, resume and per-book preferences."
+msgstr ""
+
+msgctxt "#30100"
+msgid "General"
+msgstr ""
+
+msgctxt "#30101"
+msgid "Server connection details and progress sync."
+msgstr ""
+
+# Speed step
+msgctxt "#30010"
+msgid "Speed step"
+msgstr ""
+
+msgctxt "#30011"
+msgid "Increment used by the speed up/down keys ([ and ]) and by the speed picker dialog."
+msgstr ""
+
+# Minimum speed
+msgctxt "#30020"
+msgid "Minimum speed"
+msgstr ""
+
+msgctxt "#30021"
+msgid "Lower bound for playback speed. Applied to the speed up/down keys and the speed picker dialog."
+msgstr ""
+
+# Maximum speed
+msgctxt "#30030"
+msgid "Maximum speed"
+msgstr ""
+
+msgctxt "#30031"
+msgid "Upper bound for playback speed. Applied to the speed up/down keys and the speed picker dialog."
+msgstr ""
+
+# Default book speed
+msgctxt "#30040"
+msgid "Default book speed"
+msgstr ""
+
+msgctxt "#30041"
+msgid "Starting speed for books with no remembered per-book setting. Clamped to the minimum/maximum range above."
+msgstr ""
+
+# Default podcast speed
+msgctxt "#30050"
+msgid "Default podcast speed"
+msgstr ""
+
+msgctxt "#30051"
+msgid "Starting speed for podcasts with no remembered per-podcast setting. Clamped to the minimum/maximum range above."
+msgstr ""
+
+# Remember per-book
+msgctxt "#30060"
+msgid "Remember speed per book/podcast"
+msgstr ""
+
+msgctxt "#30061"
+msgid "When enabled, the last speed used for each book or podcast is restored on replay. Disable to always use the default above."
+msgstr ""
+
+# Sync interval
+msgctxt "#30070"
+msgid "Progress sync interval"
+msgstr ""
+
+msgctxt "#30071"
+msgid "How often playback progress is sent back to the AudioBookShelf server, in seconds."
+msgstr ""
+
+# Speed step option labels (must be a string ID, hence one per option)
+msgctxt "#30090"
+msgid "0.05"
+msgstr ""
+
+msgctxt "#30091"
+msgid "0.10"
+msgstr ""
+
+msgctxt "#30092"
+msgid "0.15"
+msgstr ""
+
+msgctxt "#30093"
+msgid "0.20"
+msgstr ""
+
+msgctxt "#30094"
+msgid "0.25"
+msgstr ""
+
+# Server settings
+msgctxt "#30110"
+msgid "Server URL"
+msgstr ""
+
+msgctxt "#30111"
+msgid "Full URL of your AudioBookShelf server, including protocol and port (e.g. https://books.example.com)."
+msgstr ""
+
+msgctxt "#30120"
+msgid "API key"
+msgstr ""
+
+msgctxt "#30121"
+msgid "Long-lived API token. Preferred over username/password — create one in the AudioBookShelf web UI under Users."
+msgstr ""
+
+msgctxt "#30130"
+msgid "Username"
+msgstr ""
+
+msgctxt "#30131"
+msgid "Used only if no API key is set. KoShelf logs in and caches a session token."
+msgstr ""
+
+msgctxt "#30140"
+msgid "Password"
+msgstr ""
+
+msgctxt "#30141"
+msgid "Used only if no API key is set."
+msgstr ""

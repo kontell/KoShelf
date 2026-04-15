@@ -18,7 +18,28 @@ SPEEDS_FILE = os.path.join(PROFILE_DIR, 'speeds.json')
 SLEEP_FILE = os.path.join(PROFILE_DIR, 'sleep_timer')
 TOKEN_FILE = os.path.join(PROFILE_DIR, 'token.json')
 TEMPO_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo')
-STEP_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo_step')
+CONFIG_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo_config')
+
+
+def _get_float(setting_id, default):
+    try:
+        return float(ADDON.getSetting(setting_id))
+    except (ValueError, TypeError):
+        return default
+
+
+def write_config():
+    """Write {step, min, max} as JSON for speed.py to consume."""
+    step = _get_float('speed_step', 0.10)
+    lo = _get_float('min_speed', 1.0)
+    hi = _get_float('max_speed', 3.0)
+    if lo > hi:
+        lo, hi = 0.5, 5.0
+    try:
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump({'step': step, 'min': lo, 'max': hi}, f)
+    except IOError:
+        pass
 
 
 def load_session():
@@ -164,38 +185,27 @@ def run():
     chapters = []
     last_book_speed_save = 0
 
+    # Seed the shared tempo config so speed.py has min/max/step ready even
+    # if the user triggers keys before opening playback from KoShelf.
+    write_config()
+
     xbmc.log('KoShelf service started', xbmc.LOGINFO)
 
     while not monitor.abortRequested():
         if monitor.waitForAbort(1):
             break
 
-        # Handle settings change — update tempo file if speed setting changed
+        # Handle settings change — refresh sync interval and tempo config.
         if monitor.settings_changed:
             monitor.settings_changed = False
             try:
                 sync_interval = int(ADDON.getSetting('sync_interval'))
             except (ValueError, TypeError):
                 pass
-            # Write step file for inputstream.tempo keyboard control
-            mode = ADDON.getSetting('speed_mode') or 'Presets'
-            if mode == 'Custom increment':
-                try:
-                    step = float(ADDON.getSetting('speed_step') or '0.10')
-                    with open(STEP_FILE, 'w') as f:
-                        f.write(str(step))
-                except (ValueError, IOError):
-                    pass
-            else:
-                try:
-                    if os.path.exists(STEP_FILE):
-                        os.remove(STEP_FILE)
-                except OSError:
-                    pass
-
-            # Note: book/podcast defaults are separate settings now.
-            # Speed changes during playback are handled by inputstream.tempo's
-            # keyboard shortcuts ([/]) which write directly to TEMPO_FILE.
+            # Refresh shared tempo config so speed.py sees new step/min/max.
+            # Speed changes during playback are driven by inputstream.tempo's
+            # keyboard/remote shortcuts which write directly to TEMPO_FILE.
+            write_config()
 
         # Check if audio is playing
         if not player.isPlayingAudio():
@@ -255,12 +265,15 @@ def run():
             xbmc.log('KoShelf: tracking session {}'.format(session_id),
                      xbmc.LOGINFO)
 
-        # Seek to resume position once after playback starts
+        # Seek to resume position once the stream is fully ready.
+        # getTotalTime() returns 0 until the demuxer has stream info, which is
+        # when seekTime() can actually reach the inputstream without being lost.
         if not seek_done:
             start_time = active_session.get('start_time', 0)
             if start_time > 5:
-                xbmc.sleep(500)
                 try:
+                    if player.getTotalTime() <= 0:
+                        continue  # not ready yet, retry next tick
                     player.seekTime(start_time)
                     xbmc.log('KoShelf: seeked to {:.0f}s'.format(start_time),
                              xbmc.LOGINFO)

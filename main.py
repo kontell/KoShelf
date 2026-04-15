@@ -147,8 +147,8 @@ def route_settings():
     """Open addon settings dialog."""
     ADDON.openSettings()
 
-    # After settings close, write the step file for inputstream.tempo
-    _write_step_file()
+    # After settings close, refresh the config file for inputstream.tempo.
+    _write_config_file()
 
 
 def route_continue_listening(client):
@@ -197,7 +197,9 @@ def route_continue_listening(client):
                                  episode_id=ep_id)
             add_playable(label, play_url, art=art, info=info, progress=ep_progress)
         else:
-            # Book
+            # Book — skip ebook-only items (no audio)
+            if media.get('numAudioFiles', 0) == 0 and not media.get('duration'):
+                continue
             title = meta.get('title', 'Unknown')
             duration = media.get('duration', 0)
             item_progress = all_progress.get(item_id)
@@ -283,7 +285,9 @@ def _add_library_item(client, item, media_type, library_id):
         add_directory(label, action='podcast_episodes',
                       item_id=item['id'], library_id=library_id)
     else:
-        # Book
+        # Book — skip ebook-only items (no audio)
+        if media.get('numAudioFiles', 0) == 0 and not media.get('duration'):
+            return
         duration = media.get('duration', 0)
         narrator = meta.get('narratorName', '')
         author = meta.get('authorName', '')
@@ -522,7 +526,7 @@ SPEEDS_FILE = os.path.join(PROFILE_DIR, 'speeds.json')
 SLEEP_FILE = os.path.join(PROFILE_DIR, 'sleep_timer')
 # Standardised files shared with inputstream.tempo
 TEMPO_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo')
-STEP_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo_step')
+CONFIG_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo_config')
 
 
 def _save_session(data):
@@ -532,16 +536,33 @@ def _save_session(data):
         json.dump(data, f)
 
 
-def _get_tempo(media_type='book'):
-    """Get default playback speed from settings for the given media type."""
-    if media_type == 'podcast':
-        speed_str = ADDON.getSetting('podcast_speed') or '1.0x'
-    else:
-        speed_str = ADDON.getSetting('book_speed') or '1.0x'
+def _get_float(setting_id, default):
     try:
-        return float(speed_str.rstrip('x'))
-    except ValueError:
-        return 1.0
+        return float(ADDON.getSetting(setting_id))
+    except (ValueError, TypeError):
+        return default
+
+
+def _speed_config():
+    """Return (step, min, max) from settings, with sane defaults."""
+    step = _get_float('speed_step', 0.10)
+    lo = _get_float('min_speed', 1.0)
+    hi = _get_float('max_speed', 3.0)
+    # Defensive: make sure min <= max; fall back to sane range if inverted.
+    if lo > hi:
+        lo, hi = 0.5, 5.0
+    return step, lo, hi
+
+
+def _clamp(value, lo, hi):
+    return max(lo, min(hi, value))
+
+
+def _get_tempo(media_type='book'):
+    """Default playback speed for the given media type, clamped to min/max."""
+    _step, lo, hi = _speed_config()
+    raw = _get_float('podcast_speed' if media_type == 'podcast' else 'book_speed', 1.0)
+    return round(_clamp(raw, lo, hi), 2)
 
 
 def _write_tempo(tempo):
@@ -550,25 +571,14 @@ def _write_tempo(tempo):
         f.write(str(tempo))
 
 
-def _write_step_file():
-    """Write speed step increment for inputstream.tempo's keyboard stepping.
-    If speed_mode is 'custom', writes the step value. Otherwise removes the file
-    so inputstream.tempo uses its built-in presets."""
-    mode = ADDON.getSetting('speed_mode') or 'Presets'
-    if mode == 'Custom increment':
-        step_str = ADDON.getSetting('speed_step') or '0.10'
-        try:
-            step = float(step_str)
-            with open(STEP_FILE, 'w') as f:
-                f.write(str(step))
-        except (ValueError, IOError):
-            pass
-    else:
-        try:
-            if os.path.exists(STEP_FILE):
-                os.remove(STEP_FILE)
-        except OSError:
-            pass
+def _write_config_file():
+    """Write {step, min, max} as JSON for inputstream.tempo's speed.py."""
+    step, lo, hi = _speed_config()
+    try:
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump({'step': step, 'min': lo, 'max': hi}, f)
+    except IOError:
+        pass
 
 
 def _load_book_speed(item_id):
@@ -644,9 +654,12 @@ def _resolve_playback(client, item_id, episode_id=None):
     media_type = session.get('mediaType', 'book')
     use_per_item = ADDON.getSetting('per_book_speed') != 'false'
     saved_speed = _load_book_speed(item_id) if use_per_item else None
-    tempo = saved_speed if saved_speed is not None else _get_tempo(media_type)
+    raw_tempo = saved_speed if saved_speed is not None else _get_tempo(media_type)
+    # Clamp against current settings in case min/max has been tightened since save.
+    _step, lo, hi = _speed_config()
+    tempo = round(_clamp(raw_tempo, lo, hi), 2)
     _write_tempo(tempo)
-    _write_step_file()
+    _write_config_file()
 
     li = xbmcgui.ListItem(path=url)
     li.setArt({'thumb': cover_url, 'poster': cover_url})
