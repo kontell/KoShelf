@@ -20,10 +20,10 @@ This can now be tested by:
 
 ## Supported platforms
 
-| Platform | Kodi 21 (Omega) | Kodi 22 (Piers) |
-|----------|----------------|-----------------|
-| Linux x86_64 | yes | yes |
-| Linux armv7 (Pi 2+) | yes | yes |
-| Linux aarch64 (Pi 3+) | yes | yes |
-| Android ARM32 | yes | yes |
-| Android ARM64 | yes | yes |
+| Platform | Kodi 22 (Piers) |
+|----------|-----------------|
+| Linux x86_64 | yes |
+| Linux armv7 (Pi 2+) | yes |
+| Linux aarch64 (Pi 3+) | yes |
+| Android ARM32 | yes |
+| Android ARM64 | yes |
