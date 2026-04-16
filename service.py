@@ -306,6 +306,12 @@ def run():
             try:
                 current_time = player.getTime()
                 duration = active_session.get('duration', 0)
+                start_time = active_session.get('start_time', 0)
+                # Guard: don't overwrite a valid resume position with 0.
+                # Can happen if GetTime() hasn't caught up after an initial
+                # seek (e.g. m_currentPts not yet set in the inputstream).
+                if current_time < 5 and start_time > 30:
+                    continue
                 listened = now - last_sync
                 last_sync = now
                 active_session['last_time'] = current_time
