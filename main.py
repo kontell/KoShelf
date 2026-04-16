@@ -1,4 +1,4 @@
-"""KoShelf - AudioBookShelf client for Kodi."""
+"""Koshelf - AudioBookShelf client for Kodi."""
 
 import os
 import sys
@@ -51,11 +51,11 @@ def get_client():
     username = ADDON.getSetting('username')
     password = ADDON.getSetting('password')
     if not server_url:
-        xbmcgui.Dialog().ok('KoShelf', 'Please configure the server URL in addon settings.')
+        xbmcgui.Dialog().ok('Koshelf', 'Please configure the server URL in addon settings.')
         ADDON.openSettings()
         return None
     if not (username and password):
-        xbmcgui.Dialog().ok('KoShelf', 'Please configure username and password in addon settings.')
+        xbmcgui.Dialog().ok('Koshelf', 'Please configure username and password in addon settings.')
         ADDON.openSettings()
         return None
     # Try the cached session token first; login fresh if missing/expired.
@@ -184,9 +184,9 @@ def route_root(client):
     # user open the speed picker without leaving the addon via remote.
     if os.path.exists(ACTIVE_FILE):
         win = xbmcgui.Window(10000)
-        title = win.getProperty('KoShelf.NowPlaying.Title') or 'current track'
+        title = win.getProperty('Koshelf.NowPlaying.Title') or 'current track'
         speed = win.getProperty('InputstreamTempo.SpeedDisplay') or '1.0x'
-        label = '[B]Now playing[/B]: {}  [COLOR orange]{}[/COLOR]'.format(title, speed)
+        label = '[COLOR orange]{}[/COLOR] [B]Now playing[/B]: {}'.format(speed, title)
         add_directory(label, action='speed_dialog')
 
     # Continue Listening
@@ -207,8 +207,6 @@ def route_root(client):
 
 
 def _format_speed(speed):
-    if abs(speed - round(speed, 1)) < 0.001:
-        return '{:.1f}x'.format(speed)
     return '{:.2f}x'.format(speed)
 
 
@@ -288,6 +286,7 @@ def route_continue_listening(client):
                 'artist': meta.get('author', ''),
                 'album': podcast_title,
                 'duration': duration,
+                'comment': ep.get('description', ''),
                 'added_at': ep.get('addedAt') or ep.get('publishedAt'),
                 'last_played': (ep_progress or {}).get('lastUpdate'),
             }
@@ -345,9 +344,16 @@ def route_library(client, library_id, media_type):
     xbmcplugin.endOfDirectory(HANDLE)
 
 
+def _get_page_limit():
+    try:
+        return int(ADDON.getSetting('items_per_page'))
+    except (ValueError, TypeError):
+        return 100
+
+
 def route_library_items(client, library_id, media_type, page=0):
     """Paginated list of items in a library."""
-    limit = 50
+    limit = _get_page_limit()
     data = client.get_library_items(library_id, page=page, limit=limit)
     if not data:
         xbmcplugin.endOfDirectory(HANDLE)
@@ -415,7 +421,7 @@ def _add_library_item(client, item, media_type, library_id, progress_map=None):
 
 def route_series_list(client, library_id, page=0):
     """List all series in a book library."""
-    limit = 50
+    limit = _get_page_limit()
     data = client.get_series(library_id, page=page, limit=limit)
     if not data:
         xbmcplugin.endOfDirectory(HANDLE)
@@ -580,6 +586,7 @@ def route_recent_episodes(client, library_id):
             'title': ep_title,
             'album': podcast_title,
             'duration': duration,
+            'comment': ep.get('description', ''),
             'added_at': ep.get('addedAt') or ep.get('publishedAt'),
         }
         play_url = build_url(action='play_episode', item_id=item_id,
@@ -742,12 +749,14 @@ def _resolve_playback(client, item_id, episode_id=None):
         return
 
     meta = session.get('mediaMetadata', {})
-    title = meta.get('title', '')
+    # displayTitle includes the episode name for podcasts; fall back to item title
+    title = session.get('displayTitle') or meta.get('title', '')
     authors = meta.get('authors', [])
     author_str = ', '.join(a.get('name', '') for a in authors) if authors else meta.get('author', '')
     cover_url = client.cover_url(item_id)
     start_time = session.get('currentTime', 0)
     duration = session.get('duration', 0)
+    description = meta.get('description', '')
 
     # Save session info for the background service (handles sync + resume seek)
     _save_session({
@@ -794,6 +803,12 @@ def _resolve_playback(client, item_id, episode_id=None):
     tag.setTitle(title)
     if author_str:
         tag.setArtist(author_str)
+    # For podcast episodes, set album to the podcast name so OSD shows both
+    podcast_name = meta.get('title', '')
+    if episode_id and podcast_name:
+        tag.setAlbum(podcast_name)
+    if description:
+        tag.setComment(description)
     tag.setDuration(int(duration))
 
     # Route through inputstream.tempo for playback speed control

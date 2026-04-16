@@ -146,7 +146,7 @@ class ABSClient:
             path = '/api/items/{}/play/{}'.format(item_id, episode_id)
         body = {
             'deviceInfo': {
-                'clientName': 'KoShelf',
+                'clientName': 'Koshelf',
                 'deviceId': 'kodi-koshelf',
             },
         }

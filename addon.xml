@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="plugin.audio.koshelf"
-       name="KoShelf"
-       version="0.11.0"
+       name="Koshelf"
+       version="0.12.0"
        provider-name="konell">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>

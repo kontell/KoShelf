@@ -1,4 +1,4 @@
-"""KoShelf - background service for playback progress sync, resume, and audiobook features."""
+"""Koshelf - background service for playback progress sync, resume, and audiobook features."""
 
 import json
 import os
@@ -108,7 +108,7 @@ def find_chapter(chapters, current_time):
     return ''
 
 
-class KoShelfMonitor(xbmc.Monitor):
+class KoshelfMonitor(xbmc.Monitor):
     """Detects addon settings changes and writes new tempo to the shared file."""
 
     def __init__(self):
@@ -120,7 +120,7 @@ class KoShelfMonitor(xbmc.Monitor):
 
 
 def set_koshelf_properties(win, session_data, player, chapters):
-    """Update KoShelf-specific window properties during playback."""
+    """Update Koshelf-specific window properties during playback."""
     try:
         current_time = player.getTime()
     except Exception:
@@ -129,14 +129,14 @@ def set_koshelf_properties(win, session_data, player, chapters):
     # Chapter display
     chapter_name = find_chapter(chapters, current_time)
     if chapter_name:
-        win.setProperty('KoShelf.ChapterName', chapter_name)
+        win.setProperty('Koshelf.ChapterName', chapter_name)
 
     # Now playing info from session
     meta = session_data.get('media_metadata', {})
     if meta.get('title'):
-        win.setProperty('KoShelf.NowPlaying.Title', meta['title'])
+        win.setProperty('Koshelf.NowPlaying.Title', meta['title'])
     if meta.get('author'):
-        win.setProperty('KoShelf.NowPlaying.Author', meta['author'])
+        win.setProperty('Koshelf.NowPlaying.Author', meta['author'])
 
     # Sleep timer
     try:
@@ -147,24 +147,24 @@ def set_koshelf_properties(win, session_data, player, chapters):
             if remaining <= 0:
                 player.stop()
                 os.remove(SLEEP_FILE)
-                win.clearProperty('KoShelf.SleepTimerRemaining')
-                xbmc.log('KoShelf: sleep timer expired, stopping playback', xbmc.LOGINFO)
+                win.clearProperty('Koshelf.SleepTimerRemaining')
+                xbmc.log('Koshelf: sleep timer expired, stopping playback', xbmc.LOGINFO)
             else:
                 mins = int(remaining) // 60
                 secs = int(remaining) % 60
-                win.setProperty('KoShelf.SleepTimerRemaining', '{}:{:02d}'.format(mins, secs))
+                win.setProperty('Koshelf.SleepTimerRemaining', '{}:{:02d}'.format(mins, secs))
     except Exception:
         pass
 
 
 def clear_koshelf_properties(win):
-    for prop in ('KoShelf.ChapterName', 'KoShelf.NowPlaying.Title',
-                 'KoShelf.NowPlaying.Author', 'KoShelf.SleepTimerRemaining'):
+    for prop in ('Koshelf.ChapterName', 'Koshelf.NowPlaying.Title',
+                 'Koshelf.NowPlaying.Author', 'Koshelf.SleepTimerRemaining'):
         win.clearProperty(prop)
 
 
 def run():
-    monitor = KoShelfMonitor()
+    monitor = KoshelfMonitor()
     player = xbmc.Player()
     win = xbmcgui.Window(10000)
 
@@ -183,10 +183,10 @@ def run():
     last_active = False
 
     # Seed the shared tempo config so speed.py has min/max/step ready even
-    # if the user triggers keys before opening playback from KoShelf.
+    # if the user triggers keys before opening playback from Koshelf.
     write_config()
 
-    xbmc.log('KoShelf service started', xbmc.LOGINFO)
+    xbmc.log('Koshelf service started', xbmc.LOGINFO)
 
     # 0.25s poll keeps the resume-seek latency down once the stream is ready,
     # so the user hears as little of the pre-resume audio as possible.
@@ -194,7 +194,7 @@ def run():
         if monitor.waitForAbort(0.25):
             break
 
-        # When the sentinel appears or disappears, refresh a KoShelf listing
+        # When the sentinel appears or disappears, refresh a Koshelf listing
         # if that's what the user is currently looking at — so the root shows
         # the "Now playing" item without needing a manual re-entry.
         active_now = os.path.exists(ACTIVE_FILE)
@@ -229,10 +229,10 @@ def run():
                         listened = now - last_sync if last_sync > 0 else 0
                         client.sync_session(session_id, current, duration, listened)
                         client.close_session(session_id)
-                        xbmc.log('KoShelf: closed session {}'.format(session_id),
+                        xbmc.log('Koshelf: closed session {}'.format(session_id),
                                  xbmc.LOGINFO)
                     except Exception as e:
-                        xbmc.log('KoShelf: error closing session: {}'.format(e),
+                        xbmc.log('Koshelf: error closing session: {}'.format(e),
                                  xbmc.LOGWARNING)
                 active_session = None
                 client = None
@@ -266,7 +266,7 @@ def run():
                     old_dur = active_session.get('duration', 0)
                     client.sync_session(old_id, old_time, old_dur, 0)
                     client.close_session(old_id)
-                    xbmc.log('KoShelf: closed previous session {}'.format(old_id),
+                    xbmc.log('Koshelf: closed previous session {}'.format(old_id),
                              xbmc.LOGINFO)
                 except Exception:
                     pass
@@ -276,7 +276,7 @@ def run():
             last_sync = time.time()
             client = get_client()
             seek_done = False
-            xbmc.log('KoShelf: tracking session {}'.format(session_id),
+            xbmc.log('Koshelf: tracking session {}'.format(session_id),
                      xbmc.LOGINFO)
 
         # Resume seeking is now handled by inputstream.tempo's start_time
@@ -286,7 +286,7 @@ def run():
             seek_done = True
             continue
 
-        # Update KoShelf window properties (chapter, now playing, sleep timer)
+        # Update Koshelf window properties (chapter, now playing, sleep timer)
         set_koshelf_properties(win, active_session, player, chapters)
 
         # Save per-book speed periodically (every 10s, if changed)
@@ -310,10 +310,10 @@ def run():
                 last_sync = now
                 active_session['last_time'] = current_time
                 client.sync_session(session_id, current_time, duration, listened)
-                xbmc.log('KoShelf: synced {:.0f}s/{:.0f}s'.format(
+                xbmc.log('Koshelf: synced {:.0f}s/{:.0f}s'.format(
                     current_time, duration), xbmc.LOGINFO)
             except Exception as e:
-                xbmc.log('KoShelf: sync error: {}'.format(e), xbmc.LOGWARNING)
+                xbmc.log('Koshelf: sync error: {}'.format(e), xbmc.LOGWARNING)
 
     # Kodi is shutting down — close any active session
     if active_session and client:
@@ -327,7 +327,7 @@ def run():
         clear_session()
     clear_koshelf_properties(win)
 
-    xbmc.log('KoShelf service stopped', xbmc.LOGINFO)
+    xbmc.log('Koshelf service stopped', xbmc.LOGINFO)
 
 
 if __name__ == '__main__':
