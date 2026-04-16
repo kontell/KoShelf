@@ -802,6 +802,8 @@ def _resolve_playback(client, item_id, episode_id=None):
     if tempo != 1.0:
         li.setProperty('inputstream.tempo.tempo', str(tempo))
     li.setProperty('inputstream.tempo.tempo_file', TEMPO_FILE)
+    if start_time > 0:
+        li.setProperty('inputstream.tempo.start_time', str(start_time))
 
     xbmcplugin.setResolvedUrl(HANDLE, True, li)
 

@@ -279,21 +279,10 @@ def run():
             xbmc.log('KoShelf: tracking session {}'.format(session_id),
                      xbmc.LOGINFO)
 
-        # Seek to resume position once the stream is fully ready.
-        # getTotalTime() returns 0 until the demuxer has stream info, which is
-        # when seekTime() can actually reach the inputstream without being lost.
+        # Resume seeking is now handled by inputstream.tempo's start_time
+        # property — the C++ side seeks during Open() before the first packet
+        # is returned, so no audible playback from position 0.
         if not seek_done:
-            start_time = active_session.get('start_time', 0)
-            if start_time > 5:
-                try:
-                    if player.getTotalTime() <= 0:
-                        continue  # not ready yet, retry next tick
-                    player.seekTime(start_time)
-                    xbmc.log('KoShelf: seeked to {:.0f}s'.format(start_time),
-                             xbmc.LOGINFO)
-                except Exception as e:
-                    xbmc.log('KoShelf: seek error: {}'.format(e),
-                             xbmc.LOGWARNING)
             seek_done = True
             continue
 
