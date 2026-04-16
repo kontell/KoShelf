@@ -1,7 +1,22 @@
+v0.12.3
+- Resume playback uses PAPlayer's native audiobook_bookmark property.
+  PAPlayer seeks before audio output begins — no race conditions, no
+  Python seek hack, no C++ intercept.
+- Rename KoShelf → Koshelf throughout.
+- Configurable items per page (25–500, default 100) for full client-side
+  sorting of large libraries.
+- Episode title shown on OSD (uses session.displayTitle); album set to
+  podcast name for episodes.
+- Description available in info dialog (press i) via setComment() in all
+  browsing routes and during playback.
+- Now playing root label: speed at front, always two decimal places.
+- Max speed lower bound changed from 1.5x → 1.0x (allows disabling tempo).
+- Speed step description updated to reference PgUp/PgDn keys.
+- Sync guard prevents overwriting a valid resume position with 0.
+
 v0.10.5
-- Service-triggered KoShelf-root refresh when tempo sentinel appears/disappears
-  so the "Now playing" row appears without a manual re-entry.
-- Move Playback section to first in settings, ahead of General.
+- Service-triggered root refresh when tempo sentinel appears/disappears.
+- Move Playback section to first in settings.
 - Tighten service loop to 0.25s for faster resume-seek latency.
 
 v0.10.4
