@@ -163,31 +163,9 @@ def clear_koshelf_properties(win):
         win.clearProperty(prop)
 
 
-class KoshelfPlayer(xbmc.Player):
-    """Player subclass that seeks to the resume position via onAVStarted.
-
-    PAPlayer's init calls SeekTime(0) internally, overwriting any seek done
-    during the inputstream's Open(). onAVStarted fires after PAPlayer is
-    stable, so our seekTime() sticks."""
-
-    def __init__(self):
-        super().__init__()
-        self.pending_seek = 0
-
-    def onAVStarted(self):
-        if self.pending_seek > 5:
-            try:
-                self.seekTime(self.pending_seek)
-                xbmc.log('Koshelf: seeked to {:.0f}s via onAVStarted'.format(
-                    self.pending_seek), xbmc.LOGINFO)
-            except Exception as e:
-                xbmc.log('Koshelf: seek error: {}'.format(e), xbmc.LOGWARNING)
-            self.pending_seek = 0
-
-
 def run():
     monitor = KoshelfMonitor()
-    player = KoshelfPlayer()
+    player = xbmc.Player()
     win = xbmcgui.Window(10000)
 
     sync_interval = 30
@@ -295,10 +273,6 @@ def run():
             chapters = session_data.get('chapters', [])
             last_sync = time.time()
             client = get_client()
-            # Queue the resume seek — onAVStarted will fire it once PAPlayer
-            # is stable. The C++ side pre-sets m_currentPts from start_time
-            # so GetTime() shows the right position before this seek lands.
-            player.pending_seek = session_data.get('start_time', 0)
             xbmc.log('Koshelf: tracking session {}'.format(session_id),
                      xbmc.LOGINFO)
 

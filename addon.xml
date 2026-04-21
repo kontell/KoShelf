@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="plugin.audio.koshelf"
        name="Koshelf"
-       version="0.12.2"
+       version="0.12.3"
        provider-name="konell">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
@@ -17,6 +17,7 @@
     <summary lang="en">AudioBookShelf client for Kodi</summary>
     <description lang="en">Browse and play audiobooks and podcasts from your AudioBookShelf server.</description>
     <license>MIT</license>
+    <news>v0.12.3 Resume uses PAPlayer's native audiobook bookmark. Rename to Koshelf. Configurable items per page. Episode title and description on OSD. PgUp/PgDn speed keys. Max speed lower bound 1.0x.</news>
     <assets>
       <icon>resources/icon.png</icon>
     </assets>

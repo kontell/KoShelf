@@ -817,8 +817,12 @@ def _resolve_playback(client, item_id, episode_id=None):
     if tempo != 1.0:
         li.setProperty('inputstream.tempo.tempo', str(tempo))
     li.setProperty('inputstream.tempo.tempo_file', TEMPO_FILE)
+
+    # Use PAPlayer's native audiobook resume. PAPlayer reads this property
+    # in QueueNextFileEx and sets m_seekFrame BEFORE audio output begins —
+    # no race with its own SeekTime(0) init. Value is in milliseconds.
     if start_time > 0:
-        li.setProperty('inputstream.tempo.start_time', str(start_time))
+        li.setProperty('audiobook_bookmark', str(int(start_time * 1000)))
 
     xbmcplugin.setResolvedUrl(HANDLE, True, li)
 
