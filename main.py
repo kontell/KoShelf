@@ -735,8 +735,9 @@ def _save_book_speed(item_id, speed):
 
 def _resolve_playback(client, item_id, episode_id=None):
     """Create an ABS session and resolve the stream URL via inputstream.tempo."""
-    # Clear the playlist so Kodi doesn't auto-advance to next item
+    # Clear both playlists — a user can toggle player mode between sessions.
     xbmc.PlayList(xbmc.PLAYLIST_MUSIC).clear()
+    xbmc.PlayList(xbmc.PLAYLIST_VIDEO).clear()
 
     session = client.start_playback(item_id, episode_id=episode_id)
     if not session:
@@ -758,6 +759,14 @@ def _resolve_playback(client, item_id, episode_id=None):
     duration = session.get('duration', 0)
     description = meta.get('description', '')
 
+    # 0 = music player (PAPlayer), 1 = video player (VideoPlayer). The music
+    # path relies on audiobook_bookmark; the video path uses StartOffset with
+    # an onAVStarted seek fallback in service.py.
+    try:
+        player_mode = int(ADDON.getSetting('player') or 0)
+    except (ValueError, TypeError):
+        player_mode = 0
+
     # Save session info for the background service (handles sync + resume seek)
     _save_session({
         'session_id': session['id'],
@@ -767,6 +776,7 @@ def _resolve_playback(client, item_id, episode_id=None):
         'start_time': start_time,
         'started_at': time.time(),
         'chapters': session.get('chapters', []),
+        'player_mode': player_mode,
         'media_metadata': {
             'title': title,
             'author': author_str,
@@ -796,20 +806,34 @@ def _resolve_playback(client, item_id, episode_id=None):
         pass
 
     li = xbmcgui.ListItem(path=url)
-    li.setArt({'thumb': cover_url, 'poster': cover_url})
+    li.setArt({'thumb': cover_url, 'poster': cover_url, 'fanart': cover_url})
     li.setContentLookup(False)
 
-    tag = li.getMusicInfoTag()
-    tag.setTitle(title)
-    if author_str:
-        tag.setArtist(author_str)
-    # For podcast episodes, set album to the podcast name so OSD shows both
+    # InfoTag type selects the Kodi player: music tag → PAPlayer, video tag
+    # → VideoPlayer. Everything else (inputstream.tempo, sync) is identical.
     podcast_name = meta.get('title', '')
-    if episode_id and podcast_name:
-        tag.setAlbum(podcast_name)
-    if description:
-        tag.setComment(description)
-    tag.setDuration(int(duration))
+    if player_mode == 1:
+        vtag = li.getVideoInfoTag()
+        vtag.setTitle(title)
+        vtag.setMediaType('musicvideo')
+        if author_str:
+            vtag.setArtists([author_str])
+        if episode_id and podcast_name:
+            vtag.setAlbum(podcast_name)
+        if description:
+            vtag.setPlot(description)
+        if duration:
+            vtag.setDuration(int(duration))
+    else:
+        tag = li.getMusicInfoTag()
+        tag.setTitle(title)
+        if author_str:
+            tag.setArtist(author_str)
+        if episode_id and podcast_name:
+            tag.setAlbum(podcast_name)
+        if description:
+            tag.setComment(description)
+        tag.setDuration(int(duration))
 
     # Route through inputstream.tempo for playback speed control
     li.setProperty('inputstream', 'inputstream.tempo')
@@ -818,11 +842,20 @@ def _resolve_playback(client, item_id, episode_id=None):
         li.setProperty('inputstream.tempo.tempo', str(tempo))
     li.setProperty('inputstream.tempo.tempo_file', TEMPO_FILE)
 
-    # Use PAPlayer's native audiobook resume. PAPlayer reads this property
-    # in QueueNextFileEx and sets m_seekFrame BEFORE audio output begins —
-    # no race with its own SeekTime(0) init. Value is in milliseconds.
     if start_time > 0:
-        li.setProperty('audiobook_bookmark', str(int(start_time * 1000)))
+        if player_mode == 1:
+            # VideoPlayer honours StartOffset via CFileItem::SetStartOffset,
+            # applied before playback begins. ResumeTime/TotalTime are for
+            # the resume-UI consistency. A service-side onAVStarted seek is
+            # kept as a fallback for cases where StartOffset is dropped.
+            li.setProperty('StartOffset', str(int(start_time)))
+            li.setProperty('ResumeTime', str(int(start_time)))
+            if duration:
+                li.setProperty('TotalTime', str(int(duration)))
+        else:
+            # PAPlayer reads audiobook_bookmark in QueueNextFileEx and sets
+            # m_seekFrame before audio output — no race with its SeekTime(0).
+            li.setProperty('audiobook_bookmark', str(int(start_time * 1000)))
 
     xbmcplugin.setResolvedUrl(HANDLE, True, li)
 

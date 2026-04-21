@@ -1,3 +1,12 @@
+v0.13.0
+- New Player setting: choose between the Music player (PAPlayer, default)
+  and the Video player (VideoPlayer). Tempo, resume, position sync, and
+  per-book speed tracking all work in both modes. The video player path
+  uses VideoPlayer's StartOffset for resume plus a service-side
+  onAVStarted fallback. The addon now declares <provides>audio video</provides>.
+- Requires inputstream.tempo 0.3.1 or newer so the OSD position tracks
+  content time at non-1× tempo.
+
 v0.12.3
 - Resume playback uses PAPlayer's native audiobook_bookmark property.
   PAPlayer seeks before audio output begins — no race conditions, no

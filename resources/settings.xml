@@ -3,6 +3,17 @@
   <section id="plugin.audio.koshelf">
     <category id="playback" label="30000" help="30001">
       <group id="1">
+        <setting id="player" type="integer" label="30160" help="30161">
+          <level>0</level>
+          <default>0</default>
+          <constraints>
+            <options>
+              <option label="30162">0</option>
+              <option label="30163">1</option>
+            </options>
+          </constraints>
+          <control type="list" format="string"/>
+        </setting>
         <setting id="speed_step" type="string" label="30010" help="30011">
           <level>0</level>
           <default>0.10</default>

@@ -141,3 +141,20 @@ msgstr ""
 msgctxt "#30141"
 msgid "Your AudioBookShelf account password."
 msgstr ""
+
+# Player
+msgctxt "#30160"
+msgid "Player"
+msgstr ""
+
+msgctxt "#30161"
+msgid "Which Kodi player handles Koshelf playback. The music player is lighter and uses PAPlayer's native audiobook bookmark for resume. The video player uses Kodi's VideoPlayer pipeline and displays the cover art full-screen; useful if the music player misbehaves with your stream. Tempo and speed controls work in both modes."
+msgstr ""
+
+msgctxt "#30162"
+msgid "Music player"
+msgstr ""
+
+msgctxt "#30163"
+msgid "Video player"
+msgstr ""
