@@ -18,12 +18,3 @@ This can now be tested by:
       - Installing inputstream.tempo
       - KoShelf
 
-## Supported platforms
-
-| Platform | Kodi 22 (Piers) |
-|----------|-----------------|
-| Linux x86_64 | yes |
-| Linux armv7 (Pi 2+) | yes |
-| Linux aarch64 (Pi 3+) | yes |
-| Android ARM32 | yes |
-| Android ARM64 | yes |
