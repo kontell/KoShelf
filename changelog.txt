@@ -1,3 +1,12 @@
+v0.17.2
+- Fix: a failed replay from Continue Listening was erasing the book's
+  resume position. When PAPlayer couldn't open the stream (e.g.
+  transient HTTP error), the service would run its close-session path
+  with last_time=0 and sync that back to ABS, clobbering the bookmark.
+  Now the close path skips sync_session when last_time < 5 s while
+  start_time > 30 s — playback obviously never resumed, so don't
+  pretend the user listened to the first 0 s.
+
 v0.17.1
 - Move the [NN%] progress indicator to after the title in library
   listings (All Books, Series detail, Author books, Collections,

@@ -108,6 +108,33 @@ def find_chapter(chapters, current_time):
     return ''
 
 
+def _close_active_session(client, session, label='session'):
+    """Sync + close an ABS session, but never sync position=0 over a valid
+    resume point — playback may have failed to start (e.g. HTTP error),
+    leaving last_time at 0 even though start_time was the user's bookmark.
+    Syncing 0 back to ABS would clobber the bookmark and remove the book
+    from Continue Listening.
+    """
+    if not (client and session):
+        return
+    sid = session.get('session_id')
+    last = session.get('last_time', 0) or 0
+    start = session.get('start_time', 0) or 0
+    dur = session.get('duration', 0)
+    try:
+        if last < 5 and start > 30:
+            xbmc.log('Koshelf: skip sync on close ({} last={:.0f}s, '
+                     'start={:.0f}s — playback never resumed)'.format(
+                         label, last, start), xbmc.LOGINFO)
+        else:
+            client.sync_session(sid, last, dur, 0)
+        client.close_session(sid)
+        xbmc.log('Koshelf: closed {} {}'.format(label, sid), xbmc.LOGINFO)
+    except Exception as e:
+        xbmc.log('Koshelf: error closing {}: {}'.format(label, e),
+                 xbmc.LOGWARNING)
+
+
 class KoshelfMonitor(xbmc.Monitor):
     """Detects addon settings changes and writes new tempo to the shared file."""
 
@@ -218,20 +245,7 @@ def run():
         if not player.isPlaying():
             if active_session:
                 # Playback stopped — close the session
-                if client:
-                    try:
-                        current = active_session.get('last_time', 0)
-                        duration = active_session.get('duration', 0)
-                        session_id = active_session['session_id']
-                        now = time.time()
-                        listened = now - last_sync if last_sync > 0 else 0
-                        client.sync_session(session_id, current, duration, listened)
-                        client.close_session(session_id)
-                        xbmc.log('Koshelf: closed session {}'.format(session_id),
-                                 xbmc.LOGINFO)
-                    except Exception as e:
-                        xbmc.log('Koshelf: error closing session: {}'.format(e),
-                                 xbmc.LOGWARNING)
+                _close_active_session(client, active_session, 'session')
                 active_session = None
                 client = None
                 chapters = []
@@ -256,17 +270,8 @@ def run():
         # New session detected
         if not active_session or active_session.get('session_id') != session_id:
             # Close the previous session before tracking the new one
-            if active_session and client:
-                old_id = active_session.get('session_id')
-                try:
-                    old_time = active_session.get('last_time', 0)
-                    old_dur = active_session.get('duration', 0)
-                    client.sync_session(old_id, old_time, old_dur, 0)
-                    client.close_session(old_id)
-                    xbmc.log('Koshelf: closed previous session {}'.format(old_id),
-                             xbmc.LOGINFO)
-                except Exception:
-                    pass
+            if active_session:
+                _close_active_session(client, active_session, 'previous session')
 
             active_session = session_data
             chapters = session_data.get('chapters', [])
@@ -311,14 +316,8 @@ def run():
                 xbmc.log('Koshelf: sync error: {}'.format(e), xbmc.LOGWARNING)
 
     # Kodi is shutting down — close any active session
-    if active_session and client:
-        try:
-            current = active_session.get('last_time', 0)
-            duration = active_session.get('duration', 0)
-            client.sync_session(active_session['session_id'], current, duration, 0)
-            client.close_session(active_session['session_id'])
-        except Exception:
-            pass
+    if active_session:
+        _close_active_session(client, active_session, 'session on shutdown')
         clear_session()
     clear_koshelf_properties(win)
 
