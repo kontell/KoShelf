@@ -192,6 +192,20 @@ def _apply_sorts(methods, content='albums'):
         xbmcplugin.addSortMethod(HANDLE, m)
 
 
+def _progress_prefix(progress):
+    """Label prefix like '[42%] ' for an in-progress item, empty otherwise.
+
+    Matches the format used by Continue Listening so a book/episode looks
+    the same everywhere. Hides sub-1% noise (artifact of stray plays).
+    """
+    if not progress:
+        return ''
+    pct = progress.get('progress', 0) * 100
+    if pct < 1:
+        return ''
+    return '[{:.0f}%] '.format(pct)
+
+
 def format_duration(seconds):
     """Format seconds as 'Xh Ym'."""
     if not seconds:
@@ -469,14 +483,17 @@ def _add_library_item(client, item, media_type, library_id, progress_map=None):
         author = meta.get('authorName', '')
         dur_str = format_duration(duration)
 
-        label = title
+        display_title = _progress_prefix(progress) + title
+        label = display_title
         if narrator:
             label += '  [I]{}[/I]'.format(narrator)
         if dur_str:
             label += '  [COLOR gray]{}[/COLOR]'.format(dur_str)
 
         info = {
-            'title': title,
+            # display_title (with progress prefix) so album/song views that
+            # render the InfoTag title keep showing the percentage.
+            'title': display_title,
             'artist': author,
             'album': meta.get('seriesName', ''),
             'duration': duration,
@@ -597,30 +614,35 @@ def route_podcast_episodes(client, item_id, library_id):
     meta = media.get('metadata', {})
     podcast_title = meta.get('title', '')
     episodes = media.get('episodes', [])
+    progress_map = client.get_all_progress()
 
     # Sort by most recent first
     episodes.sort(key=lambda e: e.get('publishedAt', 0) or 0, reverse=True)
 
     for ep in episodes:
+        ep_id = ep.get('id', '')
         ep_title = ep.get('title', 'Unknown Episode')
         duration = ep.get('audioFile', {}).get('duration', 0)
         dur_str = format_duration(duration)
+        ep_progress = progress_map.get('{}-{}'.format(item_id, ep_id))
 
-        label = ep_title
+        display_title = _progress_prefix(ep_progress) + ep_title
+        label = display_title
         if dur_str:
             label += '  [COLOR gray]{}[/COLOR]'.format(dur_str)
 
         cover = client.cover_url(item_id)
         art = {'thumb': cover, 'poster': cover, 'fanart': cover}
         info = {
-            'title': ep_title,
+            'title': display_title,
             'album': podcast_title,
             'duration': duration,
             'comment': ep.get('description', ''),
             'added_at': ep.get('addedAt') or ep.get('publishedAt'),
+            'last_played': (ep_progress or {}).get('lastUpdate'),
         }
         play_url = build_url(action='play_episode', item_id=item_id,
-                             episode_id=ep['id'])
+                             episode_id=ep_id)
         add_playable(label, play_url, art=art, info=info)
 
     _apply_sorts(_EPISODE_SORTS)
@@ -634,6 +656,7 @@ def route_recent_episodes(client, library_id):
         xbmcplugin.endOfDirectory(HANDLE)
         return
 
+    progress_map = client.get_all_progress()
     episodes = data.get('episodes', [])
     for ep in episodes:
         item_id = ep.get('libraryItemId', '')
@@ -642,21 +665,25 @@ def route_recent_episodes(client, library_id):
         podcast_title = ep.get('audioFile', {}).get('metaTags', {}).get('tagAlbum', '')
         duration = ep.get('audioFile', {}).get('duration', 0)
         dur_str = format_duration(duration)
+        ep_progress = progress_map.get('{}-{}'.format(item_id, ep_id))
 
-        label = ep_title
+        prefix = _progress_prefix(ep_progress)
         if podcast_title:
-            label = '[B]{}[/B] - {}'.format(podcast_title, ep_title)
+            label = '{}[B]{}[/B] - {}'.format(prefix, podcast_title, ep_title)
+        else:
+            label = prefix + ep_title
         if dur_str:
             label += '  [COLOR gray]{}[/COLOR]'.format(dur_str)
 
         cover = client.cover_url(item_id)
         art = {'thumb': cover, 'poster': cover, 'fanart': cover}
         info = {
-            'title': ep_title,
+            'title': prefix + ep_title,
             'album': podcast_title,
             'duration': duration,
             'comment': ep.get('description', ''),
             'added_at': ep.get('addedAt') or ep.get('publishedAt'),
+            'last_played': (ep_progress or {}).get('lastUpdate'),
         }
         play_url = build_url(action='play_episode', item_id=item_id,
                              episode_id=ep_id)

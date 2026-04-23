@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="plugin.audio.koshelf"
        name="Koshelf"
-       version="0.16.0"
+       version="0.17.0"
        provider-name="konell">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
@@ -17,7 +17,7 @@
     <summary lang="en">AudioBookShelf client for Kodi</summary>
     <description lang="en">Browse and play audiobooks and podcasts from your AudioBookShelf server.</description>
     <license>MIT</license>
-    <news>v0.16.0 Resume no longer leaks a fraction of a second from the book's start — sets inputstream.tempo.start_time so the addon holds output until PAPlayer's bookmark seek lands.</news>
+    <news>v0.17.0 Books and podcast episodes in library browsing show a resume percentage like Continue Listening.</news>
     <assets>
       <icon>resources/icon.png</icon>
     </assets>

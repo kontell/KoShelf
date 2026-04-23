@@ -1,3 +1,10 @@
+v0.17.0
+- Books and podcast episodes in library listings now show a
+  "[NN%]" prefix when in progress — same format Continue Listening
+  uses, so an item looks the same whether you reach it via resume
+  or by browsing. Covers All Books, Series, Authors, Collections,
+  Podcast Episodes, and Recent Episodes.
+
 v0.16.0
 - Resume no longer leaks a fraction of a second from the start of the
   book. On resume, Koshelf sets inputstream.tempo.start_time in addition
