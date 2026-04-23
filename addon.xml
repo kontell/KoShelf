@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="plugin.audio.koshelf"
        name="Koshelf"
-       version="0.17.0"
+       version="0.17.1"
        provider-name="konell">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
@@ -17,7 +17,7 @@
     <summary lang="en">AudioBookShelf client for Kodi</summary>
     <description lang="en">Browse and play audiobooks and podcasts from your AudioBookShelf server.</description>
     <license>MIT</license>
-    <news>v0.17.0 Books and podcast episodes in library browsing show a resume percentage like Continue Listening.</news>
+    <news>v0.17.1 Move [NN%] indicator to after the title in library listings (Continue Listening still shows it as a prefix). Strip HTML tags from descriptions so the Info dialog no longer shows raw &lt;p&gt;&lt;b&gt; markup.</news>
     <assets>
       <icon>resources/icon.png</icon>
     </assets>

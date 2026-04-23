@@ -1,3 +1,16 @@
+v0.17.1
+- Move the [NN%] progress indicator to after the title in library
+  listings (All Books, Series detail, Author books, Collections,
+  Podcast Episodes, Recent Episodes). Leading '[' was sorting before
+  A-Z in Kodi's title sort, clustering in-progress items at the top
+  regardless of name. Continue Listening still shows the indicator
+  as a prefix — that view is ordered by last-played, not title.
+- Sanitise descriptions before they reach Kodi's Info dialog. ABS
+  often imports descriptions with HTML markup (<p>, <b>, <i>, &amp;,
+  &nbsp; etc.) copied from Audible; Kodi was rendering the tags
+  verbatim. Now parsed to plain text with paragraph breaks preserved,
+  HTML entities decoded, and NBSP normalised to ASCII space.
+
 v0.17.0
 - Books and podcast episodes in library listings now show a
   "[NN%]" prefix when in progress — same format Continue Listening

@@ -1,9 +1,12 @@
 """Koshelf - AudioBookShelf client for Kodi."""
 
+import html
 import os
+import re
 import sys
 import json
 import time
+from html.parser import HTMLParser
 from urllib.parse import urlencode, parse_qs
 
 import xbmc
@@ -84,6 +87,70 @@ def add_directory(label, **kwargs):
     li = xbmcgui.ListItem(label)
     li.setIsFolder(True)
     xbmcplugin.addDirectoryItem(HANDLE, url, li, isFolder=True)
+
+
+class _HTMLTextExtractor(HTMLParser):
+    """HTML → plain text, preserving paragraph breaks."""
+
+    # Tags that introduce a visual break — replaced by a newline.
+    _BREAKING = {'p', 'br', 'div', 'li', 'tr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'}
+
+    def __init__(self):
+        super().__init__()
+        self._parts = []
+
+    def handle_data(self, data):
+        self._parts.append(data)
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self._BREAKING:
+            self._parts.append('\n')
+
+    def handle_endtag(self, tag):
+        if tag in self._BREAKING:
+            self._parts.append('\n')
+
+    def get_text(self):
+        return ''.join(self._parts)
+
+
+def _sanitize_description(text):
+    """Strip HTML tags and normalise whitespace for Kodi's info dialog.
+
+    AudioBookShelf descriptions often arrive with HTML markup (<p>, <b>,
+    <i>, &amp;, etc.) copied from Audible metadata. Kodi renders the
+    comment verbatim, so the tags show through. Parse → plain text with
+    paragraph breaks preserved, collapse runs of blank lines.
+    """
+    if not text:
+        return ''
+    try:
+        parser = _HTMLTextExtractor()
+        parser.feed(text)
+        parser.close()
+        plain = parser.get_text()
+    except Exception:
+        plain = text
+    # Any entities missed by the parser (feed-level) get unescaped here.
+    plain = html.unescape(plain)
+    # html.unescape converts &nbsp; to U+00A0 — keep whitespace ASCII so
+    # Kodi's layout engine treats it as a normal space.
+    plain = plain.replace(' ', ' ')
+    # Collapse whitespace: trim each line, drop empty runs > 1 line.
+    lines = [line.strip() for line in plain.splitlines()]
+    out = []
+    prev_blank = True  # avoid leading blank
+    for line in lines:
+        if not line:
+            if prev_blank:
+                continue
+            prev_blank = True
+        else:
+            prev_blank = False
+        out.append(line)
+    # Collapse runs of spaces within remaining lines (tags sometimes eat
+    # the single whitespace between words).
+    return re.sub(r' +', ' ', '\n'.join(out)).strip()
 
 
 def _epoch_to_str(ms_or_s):
@@ -195,8 +262,8 @@ def _apply_sorts(methods, content='albums'):
 def _progress_prefix(progress):
     """Label prefix like '[42%] ' for an in-progress item, empty otherwise.
 
-    Matches the format used by Continue Listening so a book/episode looks
-    the same everywhere. Hides sub-1% noise (artifact of stray plays).
+    Used by Continue Listening, where the progress indicator leads the
+    title. Hides sub-1% noise (artifact of stray plays).
     """
     if not progress:
         return ''
@@ -204,6 +271,21 @@ def _progress_prefix(progress):
     if pct < 1:
         return ''
     return '[{:.0f}%] '.format(pct)
+
+
+def _progress_suffix(progress):
+    """Label suffix like ' [42%]' for library listings.
+
+    Leading '[42%] ' sorted before plain titles (bracket < A), clustering
+    in-progress items together. With the indicator trailing the title,
+    Kodi's SORT_METHOD_TITLE orders by the real title.
+    """
+    if not progress:
+        return ''
+    pct = progress.get('progress', 0) * 100
+    if pct < 1:
+        return ''
+    return ' [{:.0f}%]'.format(pct)
 
 
 def format_duration(seconds):
@@ -316,18 +398,16 @@ def route_continue_listening(client):
             ep_progress = all_progress.get(progress_key)
 
             # Put progress in the title so it's visible in album-style views
-            # (label is often hidden there). Prefix keeps it readable.
-            display_title = ep_title
-            if ep_progress:
-                pct = ep_progress.get('progress', 0) * 100
-                display_title = '[{:.0f}%] {}'.format(pct, ep_title)
+            # (label is often hidden there). Prefix form here — this view is
+            # server-sorted by last-played so the leading '[' doesn't reorder.
+            display_title = _progress_prefix(ep_progress) + ep_title
 
             info = {
                 'title': display_title,
                 'artist': meta.get('author', ''),
                 'album': podcast_title,
                 'duration': duration,
-                'comment': ep.get('description', ''),
+                'comment': _sanitize_description(ep.get('description', '')),
                 'added_at': ep.get('addedAt') or ep.get('publishedAt'),
                 'last_played': (ep_progress or {}).get('lastUpdate'),
             }
@@ -342,19 +422,16 @@ def route_continue_listening(client):
             duration = media.get('duration', 0)
             item_progress = all_progress.get(item_id)
 
-            # Put progress in the title so album-style views (which show the
-            # InfoTag title, not the ListItem label) keep showing resume %.
-            display_title = title
-            if item_progress:
-                pct = item_progress.get('progress', 0) * 100
-                display_title = '[{:.0f}%] {}'.format(pct, title)
+            # Prefix form — this view is ordered server-side, so the leading
+            # '[' doesn't reorder.
+            display_title = _progress_prefix(item_progress) + title
 
             info = {
                 'title': display_title,
                 'artist': meta.get('authorName', ''),
                 'album': meta.get('seriesName', ''),
                 'duration': duration,
-                'comment': meta.get('description', ''),
+                'comment': _sanitize_description(meta.get('description', '')),
                 'added_at': item.get('addedAt'),
                 'last_played': (item_progress or {}).get('lastUpdate'),
             }
@@ -483,21 +560,21 @@ def _add_library_item(client, item, media_type, library_id, progress_map=None):
         author = meta.get('authorName', '')
         dur_str = format_duration(duration)
 
-        display_title = _progress_prefix(progress) + title
-        label = display_title
+        label = title + _progress_suffix(progress)
         if narrator:
             label += '  [I]{}[/I]'.format(narrator)
         if dur_str:
             label += '  [COLOR gray]{}[/COLOR]'.format(dur_str)
 
         info = {
-            # display_title (with progress prefix) so album/song views that
-            # render the InfoTag title keep showing the percentage.
-            'title': display_title,
+            # Suffix form keeps the progress visible in album/song views
+            # (which render InfoTag title) without prepending '[' which
+            # would reorder Kodi's title sort.
+            'title': title + _progress_suffix(progress),
             'artist': author,
             'album': meta.get('seriesName', ''),
             'duration': duration,
-            'comment': meta.get('description', ''),
+            'comment': _sanitize_description(meta.get('description', '')),
             'added_at': item.get('addedAt'),
             'last_played': (progress or {}).get('lastUpdate'),
         }
@@ -626,18 +703,17 @@ def route_podcast_episodes(client, item_id, library_id):
         dur_str = format_duration(duration)
         ep_progress = progress_map.get('{}-{}'.format(item_id, ep_id))
 
-        display_title = _progress_prefix(ep_progress) + ep_title
-        label = display_title
+        label = ep_title + _progress_suffix(ep_progress)
         if dur_str:
             label += '  [COLOR gray]{}[/COLOR]'.format(dur_str)
 
         cover = client.cover_url(item_id)
         art = {'thumb': cover, 'poster': cover, 'fanart': cover}
         info = {
-            'title': display_title,
+            'title': ep_title + _progress_suffix(ep_progress),
             'album': podcast_title,
             'duration': duration,
-            'comment': ep.get('description', ''),
+            'comment': _sanitize_description(ep.get('description', '')),
             'added_at': ep.get('addedAt') or ep.get('publishedAt'),
             'last_played': (ep_progress or {}).get('lastUpdate'),
         }
@@ -667,21 +743,21 @@ def route_recent_episodes(client, library_id):
         dur_str = format_duration(duration)
         ep_progress = progress_map.get('{}-{}'.format(item_id, ep_id))
 
-        prefix = _progress_prefix(ep_progress)
+        suffix = _progress_suffix(ep_progress)
         if podcast_title:
-            label = '{}[B]{}[/B] - {}'.format(prefix, podcast_title, ep_title)
+            label = '[B]{}[/B] - {}{}'.format(podcast_title, ep_title, suffix)
         else:
-            label = prefix + ep_title
+            label = ep_title + suffix
         if dur_str:
             label += '  [COLOR gray]{}[/COLOR]'.format(dur_str)
 
         cover = client.cover_url(item_id)
         art = {'thumb': cover, 'poster': cover, 'fanart': cover}
         info = {
-            'title': prefix + ep_title,
+            'title': ep_title + suffix,
             'album': podcast_title,
             'duration': duration,
-            'comment': ep.get('description', ''),
+            'comment': _sanitize_description(ep.get('description', '')),
             'added_at': ep.get('addedAt') or ep.get('publishedAt'),
             'last_played': (ep_progress or {}).get('lastUpdate'),
         }
@@ -851,7 +927,7 @@ def _resolve_playback(client, item_id, episode_id=None):
     cover_url = client.cover_url(item_id)
     start_time = session.get('currentTime', 0)
     duration = session.get('duration', 0)
-    description = meta.get('description', '')
+    description = _sanitize_description(meta.get('description', ''))
 
     # Save session info for the background service (handles sync + resume seek)
     _save_session({
