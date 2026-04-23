@@ -24,7 +24,7 @@ li.setProperty('audiobook_bookmark', str(int(start_time * 1000)))
 ```
 PAPlayer reads this in `QueueNextFileEx()`, converts to a frame offset, and seeks in `ProcessStream()` before audio output begins. This avoids race conditions with PAPlayer's init `SeekTime(0)` calls.
 
-The `inputstream.tempo.start_time` property is also set so the C++ side can pre-populate `m_currentPts` for accurate `GetTime()` before the bookmark seek executes.
+The `inputstream.tempo.start_time` property is also set on resume. The C++ addon uses it to (a) pre-populate `m_currentPts` so `GetTime()` reads the resume position before the bookmark seek executes, and (b) arm an initial-seek hold that gates `DemuxRead` output until the bookmark seek arrives — without this hold, PAPlayer's sink `Resume()` can play ~50 ms of pts=0 audio from the stream start before `SeekTime(bookmark)` lands. Requires inputstream.tempo 0.3.6+.
 
 ## Speed control
 

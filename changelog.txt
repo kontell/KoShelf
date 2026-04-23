@@ -1,3 +1,11 @@
+v0.16.0
+- Resume no longer leaks a fraction of a second from the start of the
+  book. On resume, Koshelf sets inputstream.tempo.start_time in addition
+  to the usual audiobook_bookmark property. inputstream.tempo 0.3.6+
+  uses that hint to hold packet output until PAPlayer's bookmark seek
+  arrives (or a 2 s safety timeout) — so no pts=0 audio reaches the
+  sink before the seek lands. Requires inputstream.tempo 0.3.6.
+
 v0.15.0
 - Library listings now sort server-side via ABS, so the order is
   consistent across pages instead of only within the loaded page.

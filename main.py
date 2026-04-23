@@ -887,7 +887,12 @@ def _resolve_playback(client, item_id, episode_id=None):
 
     if start_time > 0:
         # PAPlayer reads audiobook_bookmark in QueueNextFileEx and sets
-        # m_seekFrame before audio output — no race with its SeekTime(0).
+        # m_seekFrame before audio output — but the sink can Resume before
+        # the seek lands, leaking a fraction of a second from the stream
+        # start. inputstream.tempo.start_time arms a hold inside the addon
+        # that gates packet output until the bookmark seek arrives, so no
+        # pts=0 audio reaches the sink.
+        li.setProperty('inputstream.tempo.start_time', str(start_time))
         li.setProperty('audiobook_bookmark', str(int(start_time * 1000)))
 
     xbmcplugin.setResolvedUrl(HANDLE, True, li)
