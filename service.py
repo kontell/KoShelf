@@ -163,44 +163,9 @@ def clear_koshelf_properties(win):
         win.clearProperty(prop)
 
 
-class KoshelfPlayer(xbmc.Player):
-    """Player subclass used for the VideoPlayer resume fallback.
-
-    VideoPlayer applies CFileItem::SetStartOffset before playback begins, so
-    in most cases no Python-side seek is needed. This fallback fires only if
-    the pre-playback seek doesn't take — set pending_seek before triggering
-    playback, and onAVStarted will attempt the seek once the player is ready.
-    No-op for the PAPlayer path (audiobook_bookmark handles resume natively).
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.pending_seek = 0
-
-    def onAVStarted(self):
-        if self.pending_seek <= 5:
-            self.pending_seek = 0
-            return
-        try:
-            current = self.getTime()
-        except RuntimeError:
-            current = 0
-        # If StartOffset already landed us near the target, don't re-seek.
-        if abs(current - self.pending_seek) < 5:
-            self.pending_seek = 0
-            return
-        try:
-            self.seekTime(self.pending_seek)
-            xbmc.log('Koshelf: VideoPlayer fallback seek to {:.0f}s'.format(
-                self.pending_seek), xbmc.LOGINFO)
-        except Exception as e:
-            xbmc.log('Koshelf: seek error: {}'.format(e), xbmc.LOGWARNING)
-        self.pending_seek = 0
-
-
 def run():
     monitor = KoshelfMonitor()
-    player = KoshelfPlayer()
+    player = xbmc.Player()
     win = xbmcgui.Window(10000)
 
     sync_interval = 30
@@ -250,7 +215,6 @@ def run():
             # keyboard/remote shortcuts which write directly to TEMPO_FILE.
             write_config()
 
-        # Check if playback is active (covers both PAPlayer and VideoPlayer).
         if not player.isPlaying():
             if active_session:
                 # Playback stopped — close the session
@@ -308,13 +272,6 @@ def run():
             chapters = session_data.get('chapters', [])
             last_sync = time.time()
             client = get_client()
-            # Arm the VideoPlayer resume fallback. For PAPlayer the
-            # audiobook_bookmark property has already queued the seek, so we
-            # leave pending_seek at 0 and onAVStarted is a no-op.
-            if session_data.get('player_mode') == 1:
-                player.pending_seek = session_data.get('start_time', 0)
-            else:
-                player.pending_seek = 0
             xbmc.log('Koshelf: tracking session {}'.format(session_id),
                      xbmc.LOGINFO)
 

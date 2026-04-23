@@ -1,3 +1,10 @@
+v0.14.0
+- Removed the Player setting and the Video player path. PAPlayer is now
+  the only player. The video path was originally added to chase a
+  tempo-tracking OSD, but its state.time progressed at wall-clock rather
+  than tempo-adjusted rate, so it offered no benefit over the music
+  player path.
+
 v0.13.0
 - New Player setting: choose between the Music player (PAPlayer, default)
   and the Video player (VideoPlayer). Tempo, resume, position sync, and
