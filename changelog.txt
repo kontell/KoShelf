@@ -1,3 +1,16 @@
+v0.15.0
+- Library listings now sort server-side via ABS, so the order is
+  consistent across pages instead of only within the loaded page.
+  A "[ Sort: ... ]" item at the top opens a picker (Title, Author,
+  Recently added/updated, Duration, Published year, Random). The
+  choice is preserved through pagination.
+- Background art: listing items expose their cover as fanart so
+  skins with a blurred-fanart visualization (Estuary and similar)
+  use the book/podcast cover as a backdrop during playback.
+- Info dialog: books in Continue Listening now include the book
+  description, and every playable item reports mediaType='song' so
+  most skins show the full music Info dialog with description.
+
 v0.14.0
 - Removed the Player setting and the Video player path. PAPlayer is now
   the only player. The video path was originally added to chase a

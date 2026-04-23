@@ -108,6 +108,8 @@ def add_playable(label, url, art=None, info=None, progress=None):
         li.setArt(art)
     if info:
         tag = li.getMusicInfoTag()
+        # Song-type tag gives the richest Info dialog (description visible).
+        tag.setMediaType('song')
         if info.get('title'):
             tag.setTitle(info['title'])
         if info.get('artist'):
@@ -124,6 +126,31 @@ def add_playable(label, url, art=None, info=None, progress=None):
         if last:
             tag.setLastPlayed(last)
     xbmcplugin.addDirectoryItem(HANDLE, url, li, isFolder=False)
+
+
+# Server-side sort options for the ABS library-items endpoint. Each entry
+# is (display label, ABS sort key, desc, media_type restriction). Kodi's
+# own SORT_METHOD_* only reorders the current page; to sort across pages
+# we ask ABS for a pre-sorted page.
+_SORT_OPTIONS = (
+    ('Title (A-Z)',           'media.metadata.titleIgnorePrefix', False, 'both'),
+    ('Title (Z-A)',           'media.metadata.titleIgnorePrefix', True,  'both'),
+    ('Author (A-Z)',          'media.metadata.authorNameLF',      False, 'book'),
+    ('Recently added',        'addedAt',                          True,  'both'),
+    ('Recently updated',      'updatedAt',                        True,  'both'),
+    ('Duration (shortest)',   'media.duration',                   False, 'book'),
+    ('Duration (longest)',    'media.duration',                   True,  'book'),
+    ('Published year (new)',  'media.metadata.publishedYear',     True,  'book'),
+    ('Random',                'random',                           False, 'both'),
+)
+_DEFAULT_SORT = 'media.metadata.titleIgnorePrefix'
+
+
+def _sort_label(sort_key, desc):
+    for label, key, d, _ in _SORT_OPTIONS:
+        if key == sort_key and d == desc:
+            return label
+    return ''
 
 
 # Sort menu presets — kept near the top so every route is consistent.
@@ -257,8 +284,8 @@ def route_continue_listening(client):
         media_type = item.get('mediaType', 'book')
         item_id = item['id']
 
-        art = {'thumb': client.cover_url(item_id),
-               'poster': client.cover_url(item_id)}
+        cover = client.cover_url(item_id)
+        art = {'thumb': cover, 'poster': cover, 'fanart': cover}
 
         if media_type == 'podcast':
             # Show the specific in-progress episode, not the podcast folder
@@ -313,6 +340,7 @@ def route_continue_listening(client):
                 'artist': meta.get('authorName', ''),
                 'album': meta.get('seriesName', ''),
                 'duration': duration,
+                'comment': meta.get('description', ''),
                 'added_at': item.get('addedAt'),
                 'last_played': (item_progress or {}).get('lastUpdate'),
             }
@@ -351,10 +379,13 @@ def _get_page_limit():
         return 100
 
 
-def route_library_items(client, library_id, media_type, page=0):
-    """Paginated list of items in a library."""
+def route_library_items(client, library_id, media_type, page=0,
+                        sort=None, desc=False):
+    """Paginated list of items in a library, sorted server-side."""
     limit = _get_page_limit()
-    data = client.get_library_items(library_id, page=page, limit=limit)
+    sort = sort or _DEFAULT_SORT
+    data = client.get_library_items(library_id, page=page, limit=limit,
+                                    sort=sort, desc=desc)
     if not data:
         xbmcplugin.endOfDirectory(HANDLE)
         return
@@ -363,18 +394,56 @@ def route_library_items(client, library_id, media_type, page=0):
     total = data.get('total', 0)
     progress_map = client.get_all_progress()
 
+    # Sort picker at the top (page 0 only — on later pages it would just
+    # be visual noise and "replace" the history stack awkwardly).
+    if page == 0:
+        label = _sort_label(sort, desc) or 'default'
+        add_directory('[COLOR gray][ Sort: {} ][/COLOR]'.format(label),
+                      action='sort_library_items', library_id=library_id,
+                      media_type=media_type, sort=sort,
+                      desc='1' if desc else '0')
+
     for item in results:
         _add_library_item(client, item, media_type, library_id, progress_map)
 
-    # Next page
+    # Next page — preserve sort/desc so pagination stays consistent.
     if (page + 1) * limit < total:
+        next_args = {
+            'action': 'library_items', 'library_id': library_id,
+            'media_type': media_type, 'page': page + 1,
+            'sort': sort,
+        }
+        if desc:
+            next_args['desc'] = '1'
         add_directory('[COLOR yellow]Next page ({}/{})[/COLOR]'.format(
-            page + 2, (total + limit - 1) // limit),
-            action='library_items', library_id=library_id,
-            media_type=media_type, page=page + 1)
+            page + 2, (total + limit - 1) // limit), **next_args)
 
     _apply_sorts(_BOOK_SORTS)
     xbmcplugin.endOfDirectory(HANDLE)
+
+
+def route_sort_library_items(library_id, media_type, current_sort, current_desc):
+    """Dialog picker for the library_items sort; reloads view with new sort."""
+    options = [o for o in _SORT_OPTIONS if o[3] in (media_type, 'both')]
+    labels = [o[0] for o in options]
+    preselect = 0
+    for i, (_, key, d, _) in enumerate(options):
+        if key == current_sort and d == current_desc:
+            preselect = i
+            break
+    choice = xbmcgui.Dialog().select('Sort by', labels, preselect=preselect)
+    if choice < 0:
+        xbmcplugin.endOfDirectory(HANDLE, succeeded=False, updateListing=False,
+                                  cacheToDisc=False)
+        return
+    _, sort_key, desc, _ = options[choice]
+    url = build_url(action='library_items', library_id=library_id,
+                    media_type=media_type, sort=sort_key,
+                    **({'desc': '1'} if desc else {}))
+    # replace=true so the picker action doesn't clutter the back-stack.
+    xbmc.executebuiltin('Container.Update({},replace)'.format(url))
+    xbmcplugin.endOfDirectory(HANDLE, succeeded=False, updateListing=False,
+                              cacheToDisc=False)
 
 
 def _add_library_item(client, item, media_type, library_id, progress_map=None):
@@ -382,8 +451,8 @@ def _add_library_item(client, item, media_type, library_id, progress_map=None):
     media = item.get('media', {})
     meta = media.get('metadata', {})
     title = meta.get('title', 'Unknown')
-    art = {'thumb': client.cover_url(item['id']),
-           'poster': client.cover_url(item['id'])}
+    cover = client.cover_url(item['id'])
+    art = {'thumb': cover, 'poster': cover, 'fanart': cover}
     progress = (progress_map or {}).get(item['id']) if progress_map else None
 
     if media_type == 'podcast':
@@ -541,8 +610,8 @@ def route_podcast_episodes(client, item_id, library_id):
         if dur_str:
             label += '  [COLOR gray]{}[/COLOR]'.format(dur_str)
 
-        art = {'thumb': client.cover_url(item_id),
-               'poster': client.cover_url(item_id)}
+        cover = client.cover_url(item_id)
+        art = {'thumb': cover, 'poster': cover, 'fanart': cover}
         info = {
             'title': ep_title,
             'album': podcast_title,
@@ -580,8 +649,8 @@ def route_recent_episodes(client, library_id):
         if dur_str:
             label += '  [COLOR gray]{}[/COLOR]'.format(dur_str)
 
-        art = {'thumb': client.cover_url(item_id),
-               'poster': client.cover_url(item_id)}
+        cover = client.cover_url(item_id)
+        art = {'thumb': cover, 'poster': cover, 'fanart': cover}
         info = {
             'title': ep_title,
             'album': podcast_title,
@@ -857,7 +926,13 @@ def router():
         route_library(client, args['library_id'], args['media_type'])
     elif action == 'library_items':
         route_library_items(client, args['library_id'], args['media_type'],
-                            page=int(args.get('page', 0)))
+                            page=int(args.get('page', 0)),
+                            sort=args.get('sort'),
+                            desc=args.get('desc') == '1')
+    elif action == 'sort_library_items':
+        route_sort_library_items(args['library_id'], args['media_type'],
+                                 current_sort=args.get('sort'),
+                                 current_desc=args.get('desc') == '1')
     elif action == 'series_list':
         route_series_list(client, args['library_id'],
                           page=int(args.get('page', 0)))
