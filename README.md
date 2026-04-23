@@ -13,7 +13,7 @@ However seeking was broken, see the fix here: https://github.com/xbmc/xbmc/pull/
 ## Installation
 
 This can now be tested by:
-  - Installing a PR build of Kodi from here: https://jenkins.kodi.tv/job/BuildMulti-PR/37970/
+  - Installing a patched build of Kodi from here: https://github.com/kontell/xbmc/actions/runs/24835968853
   - Installing the Kontell [repository](https://github.com/kontell/repository.kontell):
       - Installing inputstream.tempo
       - KoShelf
