@@ -142,3 +142,20 @@ msgctxt "#30141"
 msgid "Your AudioBookShelf account password."
 msgstr ""
 
+# Player choice
+msgctxt "#30160"
+msgid "Player"
+msgstr ""
+
+msgctxt "#30161"
+msgid "Which Kodi player core handles playback. Video player shows cover-art and visualisation fanart in the now-playing window and reports chapter info to the OSD when present in the source. Music player uses the lighter PAPlayer pipeline."
+msgstr ""
+
+msgctxt "#30162"
+msgid "Video player"
+msgstr ""
+
+msgctxt "#30163"
+msgid "Music player"
+msgstr ""
+

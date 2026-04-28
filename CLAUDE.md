@@ -1,6 +1,6 @@
 # Koshelf
 
-AudioBookShelf client for Kodi. Pure Python addon (`plugin.audio`).
+AudioBookShelf client for Kodi. Pure Python addon (`plugin.audio` + `<provides>audio video</provides>` so VideoPlayer can be selected too).
 
 ## Architecture
 
@@ -11,20 +11,21 @@ AudioBookShelf client for Kodi. Pure Python addon (`plugin.audio`).
 ## Playback pipeline
 
 1. `_resolve_playback()` creates an ABS play session, gets stream URL + resume position
-2. Sets ListItem properties for inputstream.tempo (tempo, tempo_file) and PAPlayer (audiobook_bookmark)
-3. `setResolvedUrl()` hands the ListItem to Kodi
-4. PAPlayer opens the stream via inputstream.tempo, which handles tempo processing
-5. PAPlayer's native audiobook resume reads `audiobook_bookmark` (milliseconds) and seeks before audio output — no Python seek needed
+2. Reads the `player` setting (0 = VideoPlayer default, 1 = PAPlayer) and branches the ListItem setup
+3. Sets `inputstream` + tempo properties (`tempo`, `tempo_file`, `start_time`) for both branches
+4. VideoPlayer branch: `VideoInfoTag` (mediaType `musicvideo`) + `StartOffset` (ms) + `ResumeTime`/`TotalTime` (s)
+5. PAPlayer branch: `MusicInfoTag` + `audiobook_bookmark` (ms)
+6. `setResolvedUrl()` hands the ListItem to Kodi; the matching player core opens the stream via inputstream.tempo, which handles tempo processing
+
+Both player cores route audio-only content to `WINDOW_VISUALISATION` — Kodi picks the fullscreen window from `IsPlayingAudio()`/`IsPlayingVideo()`, not the player core. The visible difference is which OSD info-labels populate (e.g. `Player.ChapterCount` is always 0 under PAPlayer) and which time-tracking path runs.
 
 ## Resume mechanism
 
-Resume uses PAPlayer's built-in audiobook bookmark support:
-```python
-li.setProperty('audiobook_bookmark', str(int(start_time * 1000)))
-```
-PAPlayer reads this in `QueueNextFileEx()`, converts to a frame offset, and seeks in `ProcessStream()` before audio output begins. This avoids race conditions with PAPlayer's init `SeekTime(0)` calls.
+Resume property differs by player:
+- **VideoPlayer**: `StartOffset` (milliseconds). Kodi consumes it via `CFileItem::SetStartOffset` and queues a `SeekTime` after demuxer open.
+- **PAPlayer**: `audiobook_bookmark` (milliseconds). Read in `QueueNextFileEx()`, converted to a frame offset, and applied in `ProcessStream()` before audio output begins.
 
-The `inputstream.tempo.start_time` property is also set on resume. The C++ addon uses it to (a) pre-populate `m_currentPts` so `GetTime()` reads the resume position before the bookmark seek executes, and (b) arm an initial-seek hold that gates `DemuxRead` output until the bookmark seek arrives — without this hold, PAPlayer's sink `Resume()` can play ~50 ms of pts=0 audio from the stream start before `SeekTime(bookmark)` lands. Requires inputstream.tempo 0.3.6+.
+In both modes Koshelf also sets `inputstream.tempo.start_time` (seconds). The C++ addon uses it to (a) pre-populate `m_currentPts` so `GetTime()` reads the resume position before the seek executes, and (b) arm a player-agnostic initial-seek hold that gates `DemuxRead` output until any `SeekTime > 100 ms` arrives — without this hold, the audio sink can play ~50 ms of pts=0 audio from the stream start before the resume seek lands. Requires inputstream.tempo 0.3.10+ (0.3.9 added VideoPlayer OSD content-time tracking via dynamic `ptsStart`; 0.3.10 also fixes a startup crash for FFmpeg-6 patched Kodi builds with Opus/webm sources).
 
 ## Speed control
 

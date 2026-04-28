@@ -1,3 +1,23 @@
+v0.18.0
+- Video player is the default again. With inputstream.tempo 0.3.10's
+  dynamic ptsStart (computed from popped-packet pts/dispTime), the
+  Video player OSD now tracks content time at non-1× tempo instead of
+  ticking at wall-clock — the regression that caused v0.14.0 to drop
+  the video path. The Video player also brings the richer now-playing
+  UI (cover-art and visualisation fanart) and surfaces embedded source
+  chapters via the music OSD's Previous/Next chapter buttons.
+- Music player is still available as an opt-in under
+  Settings → Playback → Player. PAPlayer's lighter pipeline is kept
+  for users who prefer it; resume, tempo, position sync, and per-book
+  speed tracking work in either mode. <provides> now includes "video"
+  in addition to "audio".
+- Resume works the same in both modes. The Video player branch sets
+  StartOffset (ms) plus ResumeTime/TotalTime; the Music player branch
+  keeps audiobook_bookmark. Both set inputstream.tempo.start_time so
+  the addon's player-agnostic seek-hold prevents start-of-file audio
+  leaks before the resume seek lands.
+- Requires inputstream.tempo 0.3.10 or newer.
+
 v0.17.2
 - Fix: a failed replay from Continue Listening was erasing the book's
   resume position. When PAPlayer couldn't open the stream (e.g.
