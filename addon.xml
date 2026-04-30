@@ -2,7 +2,7 @@
 <addon id="plugin.audio.koshelf"
        name="Koshelf"
        version="0.18.0"
-       provider-name="konell">
+       provider-name="kontell">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.requests" version="2.31.0"/>
