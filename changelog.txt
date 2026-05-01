@@ -1,3 +1,20 @@
+v0.19.0
+- Sleep timer with screen-dim and volume ramp-down. While playing, the
+  "Sleep timer" row in the Koshelf root menu opens a dialog with
+  presets (5/10/15/30/45/60/90 min), End of chapter, Custom..., and
+  Cancel timer. The last-used preset is highlighted on next visit.
+- While a sleep timer is active, Kodi's screensaver is temporarily
+  swapped for a black or dim mode that activates after a shorter idle
+  period (Settings → Sleep timer). The original screensaver is
+  restored when the timer expires or is cancelled. Crash-recovery
+  restores it on next service start if Kodi was killed mid-timer.
+- Volume fades to zero over the last N seconds before the timer fires
+  (default 30, configurable, 0 to disable). Adjusting the volume
+  manually during the ramp cancels it for the rest of the timer and
+  doesn't restore on cancel.
+- Optional: send a CEC standby on expiry to power off the connected
+  TV (HDMI-CEC required). Off by default.
+
 v0.18.1
 - Restore audio-only categorisation. The addon now shows only under
   Music add-ons, not Video add-ons; the v0.18.0 dual categorisation

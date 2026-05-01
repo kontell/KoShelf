@@ -8,6 +8,10 @@ AudioBookShelf client for Kodi. Pure Python addon (`plugin.audio` + `<provides>a
 - `service.py` — background service for ABS session sync, chapter display, sleep timer, per-book speed tracking
 - `abs_api.py` — AudioBookShelf REST API client
 
+## Sleep timer
+
+`SLEEP_FILE` (`special://profile/sleep_timer`) is the source of truth: main.py writes the wall-clock end-time when a timer is set, the service polls for the file. `SleepModeController` in `service.py` owns the side effects: on file-appearing it saves the current `screensaver.mode` and volume to `sleep_state.json`, applies the user's chosen sleep screensaver, and starts watching `getGlobalIdleTime()` to fire `ActivateScreenSaver` after a shorter idle window. Volume ramps to zero over `sleep_rampdown_seconds` before expiry; if the user adjusts volume mid-ramp the controller backs off and stops touching it. On expiry it calls `player.stop()`, optionally sends `CECStandby`, and restores screensaver/volume. `sleep_state.json` is the crash-recovery breadcrumb — if it exists at service start with no live SLEEP_FILE, restore the saved values.
+
 ## Playback pipeline
 
 1. `_resolve_playback()` creates an ABS play session, gets stream URL + resume position

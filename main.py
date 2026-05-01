@@ -303,14 +303,23 @@ def format_duration(seconds):
 
 def route_root(client):
     """Root menu: Continue Listening + libraries + settings."""
-    # Now playing — only shown when tempo is the active inputstream. Lets the
-    # user open the speed picker without leaving the addon via remote.
+    # Now playing + Sleep timer — only shown when tempo is the active
+    # inputstream (i.e. something Koshelf is playing). Same gating, so the
+    # row only appears when there's something to act on.
     if os.path.exists(ACTIVE_FILE):
         win = xbmcgui.Window(10000)
         title = win.getProperty('Koshelf.NowPlaying.Title') or 'current track'
         speed = win.getProperty('InputstreamTempo.SpeedDisplay') or '1.0x'
         label = '[COLOR orange]{}[/COLOR] [B]Now playing[/B]: {}'.format(speed, title)
         add_directory(label, action='speed_dialog')
+
+        sleep_remaining = win.getProperty('Koshelf.SleepTimerRemaining')
+        if sleep_remaining:
+            sleep_label = '[COLOR orange]{}[/COLOR] [B]Sleep timer[/B]'.format(
+                sleep_remaining)
+        else:
+            sleep_label = '[B]Sleep timer[/B]'
+        add_directory(sleep_label, action='set_sleep_timer')
 
     # Continue Listening
     add_directory('[B]Continue Listening[/B]', action='continue_listening')
@@ -359,6 +368,125 @@ def route_speed_dialog():
                 'Notification(Playback Speed, {}, 1200)'.format(_format_speed(new_speed)))
     # Don't change the directory view — stay at root.
     xbmcplugin.endOfDirectory(HANDLE, succeeded=False, updateListing=False, cacheToDisc=False)
+
+
+_SLEEP_PRESETS = (5, 10, 15, 30, 45, 60, 90)
+
+
+def _end_of_chapter_minutes():
+    """Wall-clock minutes until the current chapter ends, or None if no
+    chapter information is available. Adjusts for the current playback
+    tempo so a 10-minute chapter at 1.5× is reported as ~6.7 minutes."""
+    try:
+        with open(SESSION_FILE) as f:
+            session = json.load(f)
+    except Exception:
+        return None
+    chapters = session.get('chapters', [])
+    if not chapters:
+        return None
+    try:
+        current = xbmc.Player().getTime()
+    except Exception:
+        return None
+    try:
+        with open(TEMPO_FILE) as f:
+            tempo = float(f.read().strip())
+    except (IOError, ValueError):
+        tempo = 1.0
+    if tempo <= 0:
+        tempo = 1.0
+    for ch in chapters:
+        if ch.get('start', 0) <= current < ch.get('end', 0):
+            audio_remaining = ch['end'] - current
+            return (audio_remaining / tempo) / 60.0
+    return None
+
+
+def _arm_sleep_timer(minutes):
+    """Write SLEEP_FILE with end_time = now + minutes*60. The service polls
+    for the file and takes over."""
+    end_time = time.time() + minutes * 60
+    os.makedirs(PROFILE_DIR, exist_ok=True)
+    with open(SLEEP_FILE, 'w') as f:
+        f.write(str(end_time))
+
+
+def route_set_sleep_timer():
+    """Show the sleep-timer dialog. Mirrors speed_dialog: added as a
+    directory item but ends with succeeded=False so the listing is not
+    replaced."""
+    if not os.path.exists(ACTIVE_FILE):
+        xbmcplugin.endOfDirectory(HANDLE, succeeded=False, updateListing=False,
+                                  cacheToDisc=False)
+        return
+
+    try:
+        last = int(ADDON.getSetting('sleep_last_preset') or 30)
+    except (ValueError, TypeError):
+        last = 30
+
+    timer_active = os.path.exists(SLEEP_FILE)
+    options = []
+    actions = []  # parallel list: 'cancel' | int minutes | 'eoc' | 'custom'
+    if timer_active:
+        options.append('Cancel timer')
+        actions.append('cancel')
+    for m in _SLEEP_PRESETS:
+        suffix = ' (last used)' if m == last else ''
+        options.append('{} minutes{}'.format(m, suffix))
+        actions.append(m)
+    options.append('End of chapter')
+    actions.append('eoc')
+    options.append('Custom...')
+    actions.append('custom')
+
+    sel = xbmcgui.Dialog().select('Sleep timer', options)
+    if sel < 0:
+        xbmcplugin.endOfDirectory(HANDLE, succeeded=False, updateListing=False,
+                                  cacheToDisc=False)
+        return
+
+    choice = actions[sel]
+
+    if choice == 'cancel':
+        try:
+            os.remove(SLEEP_FILE)
+        except OSError:
+            pass
+        xbmc.executebuiltin('Notification(Sleep timer, Cancelled, 1500)')
+    elif choice == 'eoc':
+        mins = _end_of_chapter_minutes()
+        if not mins or mins <= 0:
+            xbmcgui.Dialog().ok('Sleep timer',
+                                'No chapter information available.')
+        else:
+            _arm_sleep_timer(mins)
+            xbmc.executebuiltin('Notification(Sleep timer, '
+                                'End of chapter ({:.0f} min), 1500)'.format(mins))
+    elif choice == 'custom':
+        kb = xbmc.Keyboard('', 'Sleep timer minutes')
+        kb.doModal()
+        if kb.isConfirmed():
+            try:
+                mins = float(kb.getText().strip())
+            except ValueError:
+                mins = 0
+            if mins > 0:
+                _arm_sleep_timer(mins)
+                if mins == int(mins):
+                    ADDON.setSetting('sleep_last_preset', str(int(mins)))
+                xbmc.executebuiltin(
+                    'Notification(Sleep timer, Set for {:.0f} min, 1500)'.format(mins))
+    else:
+        # Numeric preset
+        _arm_sleep_timer(choice)
+        ADDON.setSetting('sleep_last_preset', str(int(choice)))
+        xbmc.executebuiltin(
+            'Notification(Sleep timer, Set for {} min, 1500)'.format(choice))
+
+    xbmcplugin.endOfDirectory(HANDLE, succeeded=False, updateListing=False,
+                              cacheToDisc=False)
 
 
 def route_settings():
@@ -1103,6 +1231,8 @@ def router():
         route_settings()
     elif action == 'speed_dialog':
         route_speed_dialog()
+    elif action == 'set_sleep_timer':
+        route_set_sleep_timer()
 
 
 if __name__ == '__main__':

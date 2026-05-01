@@ -159,3 +159,106 @@ msgctxt "#30163"
 msgid "Music player"
 msgstr ""
 
+# Sleep timer category
+msgctxt "#30200"
+msgid "Sleep timer"
+msgstr ""
+
+msgctxt "#30201"
+msgid "Behaviour while a sleep timer is counting down."
+msgstr ""
+
+# Dim screen
+msgctxt "#30210"
+msgid "Dim the screen during the sleep timer"
+msgstr ""
+
+msgctxt "#30211"
+msgid "While a sleep timer is active, replace Kodi's screensaver with the mode chosen below and trigger it after a shorter idle period. The original screensaver is restored when the timer expires or is cancelled."
+msgstr ""
+
+# Idle seconds
+msgctxt "#30220"
+msgid "Idle seconds before screen dims"
+msgstr ""
+
+msgctxt "#30221"
+msgid "How many seconds without input before the sleep-timer screensaver kicks in."
+msgstr ""
+
+# Screensaver mode
+msgctxt "#30230"
+msgid "Screensaver"
+msgstr ""
+
+msgctxt "#30231"
+msgid "Which screensaver to use during the sleep timer. Black hides everything; Dim fades the current screen."
+msgstr ""
+
+msgctxt "#30232"
+msgid "Black"
+msgstr ""
+
+msgctxt "#30233"
+msgid "Dim"
+msgstr ""
+
+# Display off
+msgctxt "#30240"
+msgid "Turn off display when timer expires (CEC only)"
+msgstr ""
+
+msgctxt "#30241"
+msgid "After the sleep timer fires, send a CEC standby message to power off the connected TV. Requires HDMI-CEC to be enabled and a compatible display."
+msgstr ""
+
+# Volume ramp-down
+msgctxt "#30250"
+msgid "Volume ramp-down (seconds)"
+msgstr ""
+
+msgctxt "#30251"
+msgid "Fade volume to zero over this many seconds before the sleep timer fires. Set to 0 to disable. Adjusting the volume manually during the ramp cancels it for the rest of the timer."
+msgstr ""
+
+# Sleep timer dialog labels
+msgctxt "#30260"
+msgid "Cancel timer"
+msgstr ""
+
+msgctxt "#30261"
+msgid "End of chapter"
+msgstr ""
+
+msgctxt "#30262"
+msgid "Custom..."
+msgstr ""
+
+msgctxt "#30263"
+msgid "Sleep timer"
+msgstr ""
+
+msgctxt "#30264"
+msgid "Set for {} min"
+msgstr ""
+
+msgctxt "#30265"
+msgid "Cancelled"
+msgstr ""
+
+msgctxt "#30266"
+msgid "{} minutes"
+msgstr ""
+
+msgctxt "#30267"
+msgid "{} minutes (last used)"
+msgstr ""
+
+msgctxt "#30268"
+msgid "No chapter information available."
+msgstr ""
+
+msgctxt "#30269"
+msgid "Sleep timer minutes"
+msgstr ""
+

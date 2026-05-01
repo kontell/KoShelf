@@ -16,6 +16,7 @@ PROFILE_DIR = xbmcvfs.translatePath(ADDON.getAddonInfo('profile'))
 SESSION_FILE = os.path.join(PROFILE_DIR, 'session.json')
 SPEEDS_FILE = os.path.join(PROFILE_DIR, 'speeds.json')
 SLEEP_FILE = os.path.join(PROFILE_DIR, 'sleep_timer')
+SLEEP_STATE_FILE = os.path.join(PROFILE_DIR, 'sleep_state.json')
 TOKEN_FILE = os.path.join(PROFILE_DIR, 'token.json')
 TEMPO_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo')
 CONFIG_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo_config')
@@ -135,6 +136,227 @@ def _close_active_session(client, session, label='session'):
                  xbmc.LOGWARNING)
 
 
+def _jsonrpc(method, params=None):
+    """Run a JSON-RPC call and return the result dict (or {})."""
+    try:
+        req = {'jsonrpc': '2.0', 'id': 1, 'method': method}
+        if params is not None:
+            req['params'] = params
+        resp = json.loads(xbmc.executeJSONRPC(json.dumps(req)))
+        return resp.get('result', {}) or {}
+    except Exception as e:
+        xbmc.log('Koshelf: JSON-RPC error ({}): {}'.format(method, e),
+                 xbmc.LOGWARNING)
+        return {}
+
+
+class SleepModeController:
+    """Owns sleep-timer side effects: screensaver swap, volume ramp-down,
+    display-off-on-expire, and crash recovery.
+
+    The controller is driven by the existence of SLEEP_FILE — main.py writes
+    it (epoch seconds = end_time) to start a timer. The service polls it and
+    when the file appears we save the current screensaver mode + volume,
+    swap the screensaver to the user's chosen sleep mode, and start watching
+    for idle/ramp-down. When the file disappears (expiry or external cancel)
+    we restore everything.
+    """
+
+    def __init__(self):
+        self.active = False
+        self.original_screensaver_mode = None
+        self.original_volume = None
+        self.last_applied_volume = None
+        self.user_overrode_volume = False
+        # Crash recovery: a previous Kodi run crashed mid-timer and left
+        # state behind. Restore the user's screensaver and volume now so
+        # they don't stay stuck on the sleep-mode settings.
+        if os.path.exists(SLEEP_STATE_FILE) and not os.path.exists(SLEEP_FILE):
+            self._restore_from_state_file()
+
+    def _restore_from_state_file(self):
+        try:
+            with open(SLEEP_STATE_FILE) as f:
+                state = json.load(f)
+            mode = state.get('screensaver_mode')
+            if mode:
+                _jsonrpc('Settings.SetSettingValue',
+                         {'setting': 'screensaver.mode', 'value': mode})
+            vol = state.get('volume')
+            if vol is not None:
+                _jsonrpc('Application.SetVolume', {'volume': int(vol)})
+            os.remove(SLEEP_STATE_FILE)
+            xbmc.log('Koshelf: restored orphaned sleep-mode state',
+                     xbmc.LOGINFO)
+        except Exception as e:
+            xbmc.log('Koshelf: error restoring sleep state: {}'.format(e),
+                     xbmc.LOGWARNING)
+
+    def tick(self, player, win):
+        """Poll once. Called from the service loop while playback is active.
+
+        Returns True if the timer expired this tick (caller may want to
+        skip remaining work), False otherwise.
+        """
+        sleep_file_exists = os.path.exists(SLEEP_FILE)
+
+        if sleep_file_exists and not self.active:
+            self._enter()
+        elif not sleep_file_exists and self.active:
+            self._exit()
+            win.clearProperty('Koshelf.SleepTimerRemaining')
+            return False
+
+        if not self.active:
+            return False
+
+        try:
+            with open(SLEEP_FILE) as f:
+                end_time = float(f.read().strip())
+        except Exception:
+            self._exit()
+            win.clearProperty('Koshelf.SleepTimerRemaining')
+            return False
+
+        remaining = end_time - time.time()
+
+        if remaining <= 0:
+            self._expire(player)
+            win.clearProperty('Koshelf.SleepTimerRemaining')
+            return True
+
+        mins = int(remaining) // 60
+        secs = int(remaining) % 60
+        win.setProperty('Koshelf.SleepTimerRemaining',
+                        '{}:{:02d}'.format(mins, secs))
+
+        self._maybe_activate_screensaver()
+        self._maybe_ramp_volume(remaining)
+        return False
+
+    def on_playback_stopped(self, win):
+        """Called when playback stops while we're not in tick(). Cancels the
+        timer and restores state so a manual stop doesn't leave the screen
+        dimmed or volume faded."""
+        if os.path.exists(SLEEP_FILE):
+            try:
+                os.remove(SLEEP_FILE)
+            except OSError:
+                pass
+        if self.active:
+            self._exit()
+        win.clearProperty('Koshelf.SleepTimerRemaining')
+
+    def _enter(self):
+        self.active = True
+        self.user_overrode_volume = False
+        # Save originals
+        mode = _jsonrpc('Settings.GetSettingValue',
+                        {'setting': 'screensaver.mode'}).get('value', '')
+        vol = _jsonrpc('Application.GetProperties',
+                       {'properties': ['volume']}).get('volume')
+        self.original_screensaver_mode = mode
+        self.original_volume = vol
+        self.last_applied_volume = vol
+        # Persist for crash recovery
+        try:
+            with open(SLEEP_STATE_FILE, 'w') as f:
+                json.dump({'screensaver_mode': mode, 'volume': vol}, f)
+        except IOError:
+            pass
+        # Apply sleep screensaver (only if user enabled the dim-screen feature)
+        if ADDON.getSetting('sleep_dim_screen') != 'false':
+            sleep_mode = (ADDON.getSetting('sleep_screensaver_mode')
+                          or 'screensaver.xbmc.builtin.black')
+            if sleep_mode and sleep_mode != mode:
+                _jsonrpc('Settings.SetSettingValue',
+                         {'setting': 'screensaver.mode', 'value': sleep_mode})
+        xbmc.log('Koshelf: sleep mode entered (saved screensaver={!r}, '
+                 'volume={})'.format(mode, vol), xbmc.LOGINFO)
+
+    def _exit(self):
+        # Restore originals
+        if self.original_screensaver_mode is not None:
+            _jsonrpc('Settings.SetSettingValue',
+                     {'setting': 'screensaver.mode',
+                      'value': self.original_screensaver_mode})
+        if self.original_volume is not None and not self.user_overrode_volume:
+            _jsonrpc('Application.SetVolume',
+                     {'volume': int(self.original_volume)})
+        try:
+            if os.path.exists(SLEEP_STATE_FILE):
+                os.remove(SLEEP_STATE_FILE)
+        except OSError:
+            pass
+        xbmc.log('Koshelf: sleep mode exited', xbmc.LOGINFO)
+        self.active = False
+        self.original_screensaver_mode = None
+        self.original_volume = None
+        self.last_applied_volume = None
+        self.user_overrode_volume = False
+
+    def _expire(self, player):
+        xbmc.log('Koshelf: sleep timer expired, stopping playback',
+                 xbmc.LOGINFO)
+        try:
+            player.stop()
+        except Exception:
+            pass
+        try:
+            os.remove(SLEEP_FILE)
+        except OSError:
+            pass
+        display_off = ADDON.getSetting('sleep_display_off') == 'true'
+        # Restore *before* CEC standby so the volume restore JSON-RPC has
+        # a chance to land before the display goes to sleep.
+        self._exit()
+        if display_off:
+            xbmc.log('Koshelf: sending CEC standby', xbmc.LOGINFO)
+            xbmc.executebuiltin('CECStandby')
+
+    def _maybe_activate_screensaver(self):
+        if ADDON.getSetting('sleep_dim_screen') == 'false':
+            return
+        try:
+            idle_thresh = int(ADDON.getSetting('sleep_idle_seconds'))
+        except (ValueError, TypeError):
+            idle_thresh = 30
+        try:
+            idle = xbmc.getGlobalIdleTime()
+        except Exception:
+            return
+        if idle >= idle_thresh and not xbmc.getCondVisibility(
+                'System.ScreenSaverActive'):
+            xbmc.executebuiltin('ActivateScreenSaver')
+
+    def _maybe_ramp_volume(self, remaining):
+        try:
+            ramp = int(ADDON.getSetting('sleep_rampdown_seconds'))
+        except (ValueError, TypeError):
+            ramp = 30
+        if ramp <= 0 or remaining > ramp or self.original_volume is None:
+            return
+        if self.user_overrode_volume:
+            return
+        # Detect user volume override: current volume differs from what we
+        # last set. If so, back off — don't fight the user, and don't
+        # restore on cancel either (they want their new volume).
+        cur = _jsonrpc('Application.GetProperties',
+                       {'properties': ['volume']}).get('volume')
+        if (self.last_applied_volume is not None and cur is not None
+                and cur != self.last_applied_volume):
+            xbmc.log('Koshelf: volume ramp backed off (user adjusted from '
+                     '{} to {})'.format(self.last_applied_volume, cur),
+                     xbmc.LOGINFO)
+            self.user_overrode_volume = True
+            return
+        target = max(0, int(round(self.original_volume * remaining / ramp)))
+        if cur is None or target == cur:
+            return
+        _jsonrpc('Application.SetVolume', {'volume': target})
+        self.last_applied_volume = target
+
+
 class KoshelfMonitor(xbmc.Monitor):
     """Detects addon settings changes and writes new tempo to the shared file."""
 
@@ -165,25 +387,6 @@ def set_koshelf_properties(win, session_data, player, chapters):
     if meta.get('author'):
         win.setProperty('Koshelf.NowPlaying.Author', meta['author'])
 
-    # Sleep timer
-    try:
-        if os.path.exists(SLEEP_FILE):
-            with open(SLEEP_FILE) as f:
-                end_time = float(f.read().strip())
-            remaining = end_time - time.time()
-            if remaining <= 0:
-                player.stop()
-                os.remove(SLEEP_FILE)
-                win.clearProperty('Koshelf.SleepTimerRemaining')
-                xbmc.log('Koshelf: sleep timer expired, stopping playback', xbmc.LOGINFO)
-            else:
-                mins = int(remaining) // 60
-                secs = int(remaining) % 60
-                win.setProperty('Koshelf.SleepTimerRemaining', '{}:{:02d}'.format(mins, secs))
-    except Exception:
-        pass
-
-
 def clear_koshelf_properties(win):
     for prop in ('Koshelf.ChapterName', 'Koshelf.NowPlaying.Title',
                  'Koshelf.NowPlaying.Author', 'Koshelf.SleepTimerRemaining'):
@@ -207,6 +410,7 @@ def run():
     chapters = []
     last_book_speed_save = 0
     last_active = False
+    sleep_controller = SleepModeController()
 
     # Seed the shared tempo config so speed.py has min/max/step ready even
     # if the user triggers keys before opening playback from Koshelf.
@@ -256,6 +460,7 @@ def run():
                         os.remove(ACTIVE_FILE)
                 except OSError:
                     pass
+            sleep_controller.on_playback_stopped(win)
             continue
 
         # Audio is playing — check if we have a session to track
@@ -280,8 +485,11 @@ def run():
             xbmc.log('Koshelf: tracking session {}'.format(session_id),
                      xbmc.LOGINFO)
 
-        # Update Koshelf window properties (chapter, now playing, sleep timer)
+        # Update Koshelf window properties (chapter, now playing)
         set_koshelf_properties(win, active_session, player, chapters)
+
+        # Sleep timer + screensaver swap + volume ramp-down
+        sleep_controller.tick(player, win)
 
         # Save per-book speed periodically (every 10s, if changed)
         now = time.time()
@@ -315,10 +523,13 @@ def run():
             except Exception as e:
                 xbmc.log('Koshelf: sync error: {}'.format(e), xbmc.LOGWARNING)
 
-    # Kodi is shutting down — close any active session
+    # Kodi is shutting down — close any active session and restore any
+    # in-flight sleep-mode state so the user's screensaver/volume aren't
+    # left on the sleep-mode values across a Kodi restart.
     if active_session:
         _close_active_session(client, active_session, 'session on shutdown')
         clear_session()
+    sleep_controller.on_playback_stopped(win)
     clear_koshelf_properties(win)
 
     xbmc.log('Koshelf service stopped', xbmc.LOGINFO)
