@@ -1,6 +1,6 @@
 # Koshelf
 
-AudioBookShelf client for Kodi. Pure Python addon (`plugin.audio` + `<provides>audio video</provides>` so VideoPlayer can be selected too).
+AudioBookShelf client for Kodi. Pure Python addon (`plugin.audio` + `<provides>audio</provides>`). VideoPlayer is selected at playback time via the ListItem's `VideoInfoTag` (mediaType `musicvideo`), not via `<provides>video</provides>` — that tag only controls whether the addon appears under Video add-ons in the browser, and including it makes the i (info) button no-op there because Kodi opens DialogVideoInfo instead of DialogMusicInfo.
 
 ## Architecture
 

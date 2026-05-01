@@ -1,3 +1,13 @@
+v0.18.1
+- Restore audio-only categorisation. The addon now shows only under
+  Music add-ons, not Video add-ons; the v0.18.0 dual categorisation
+  caused the i (info) button to no-op when the addon was launched from
+  Video add-ons (DialogVideoInfo never opened).
+- VideoPlayer playback is still the default. Player core selection is
+  driven by the ListItem's VideoInfoTag, not by the addon's <provides>
+  category, so removing "video" from <provides> doesn't affect which
+  player core handles playback.
+
 v0.18.0
 - Video player is the default again. With inputstream.tempo 0.3.10's
   dynamic ptsStart (computed from popped-packet pts/dispTime), the
