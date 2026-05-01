@@ -14,6 +14,7 @@ control, resume across devices, and per-book playback speed memory.
 - Resume where ABS last had you. Position is synced back to the server
   while you listen.
 - Per-book and per-podcast playback speeds, remembered between sessions.
+- Sleep timer.
 - Uses VideoPlayer by default (PAPlayer is broken without Kodi patches).
 
 ## Installation
