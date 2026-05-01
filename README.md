@@ -10,6 +10,7 @@ control, resume across devices, and per-book playback speed memory.
   server.
 - Pitch-corrected playback speed (0.5×–5×) via
   [`inputstream.tempo`](https://github.com/kontell/inputstream.tempo).
+    - Does *not* require syncing playback to display.
 - Resume where ABS last had you. Position is synced back to the server
   while you listen.
 - Per-book and per-podcast playback speeds, remembered between sessions.
