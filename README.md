@@ -35,9 +35,3 @@ control, resume across devices, and per-book playback speed memory.
 | Linux aarch64 (Pi 3+) | yes | yes |
 | Android ARM32 | yes | yes |
 | Android ARM64 | yes | yes |
-
-## Links
-
-- [AudioBookShelf](https://www.audiobookshelf.org/)
-- [`inputstream.tempo` (fork)](https://github.com/kontell/inputstream.tempo)
-- [`repository.kontell`](https://github.com/kontell/repository.kontell)
