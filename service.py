@@ -151,16 +151,26 @@ def _jsonrpc(method, params=None):
 
 
 class SleepModeController:
-    """Owns sleep-timer side effects: screensaver swap, volume ramp-down,
-    display-off-on-expire, and crash recovery.
+    """Owns sleep-timer side effects: screen action, volume ramp-down,
+    and crash recovery.
 
     The controller is driven by the existence of SLEEP_FILE — main.py writes
     it (epoch seconds = end_time) to start a timer. The service polls it and
-    when the file appears we save the current screensaver mode + volume,
-    swap the screensaver to the user's chosen sleep mode, and start watching
-    for idle/ramp-down. When the file disappears (expiry or external cancel)
-    we restore everything.
+    when the file appears we save state and begin watching for idle/ramp-down.
+    When the file disappears (expiry or external cancel) we restore everything.
+
+    Screen action modes (sleep_screen_action setting):
+      none             — don't touch the screen
+      screensaver_black — swap Kodi screensaver to black, activate after idle
+      screensaver_dim  — swap Kodi screensaver to dim, activate after idle
+      screen_off_cec   — send CEC standby after idle
+      screen_off_android — toggle DPMS after idle (Android/built-in display)
     """
+
+    _SCREENSAVER_MODES = {
+        'screensaver_black': 'screensaver.xbmc.builtin.black',
+        'screensaver_dim': 'screensaver.xbmc.builtin.dim',
+    }
 
     def __init__(self):
         self.active = False
@@ -168,9 +178,8 @@ class SleepModeController:
         self.original_volume = None
         self.last_applied_volume = None
         self.user_overrode_volume = False
-        # Crash recovery: a previous Kodi run crashed mid-timer and left
-        # state behind. Restore the user's screensaver and volume now so
-        # they don't stay stuck on the sleep-mode settings.
+        self._screen_action_fired = False
+        self._screen_action = 'none'
         if os.path.exists(SLEEP_STATE_FILE) and not os.path.exists(SLEEP_FILE):
             self._restore_from_state_file()
 
@@ -185,6 +194,10 @@ class SleepModeController:
             vol = state.get('volume')
             if vol is not None:
                 _jsonrpc('Application.SetVolume', {'volume': int(vol)})
+            action = state.get('screen_action', '')
+            if action == 'screen_off_android':
+                if xbmc.getCondVisibility('System.DPMSActive'):
+                    xbmc.executebuiltin('ToggleDPMS')
             os.remove(SLEEP_STATE_FILE)
             xbmc.log('Koshelf: restored orphaned sleep-mode state',
                      xbmc.LOGINFO)
@@ -230,7 +243,7 @@ class SleepModeController:
         win.setProperty('Koshelf.SleepTimerRemaining',
                         '{}:{:02d}'.format(mins, secs))
 
-        self._maybe_activate_screensaver()
+        self._maybe_fire_screen_action()
         self._maybe_ramp_volume(remaining)
         return False
 
@@ -250,6 +263,9 @@ class SleepModeController:
     def _enter(self):
         self.active = True
         self.user_overrode_volume = False
+        self._screen_action_fired = False
+        self._screen_action = (ADDON.getSetting('sleep_screen_action')
+                               or 'screensaver_black')
         # Save originals
         mode = _jsonrpc('Settings.GetSettingValue',
                         {'setting': 'screensaver.mode'}).get('value', '')
@@ -261,25 +277,37 @@ class SleepModeController:
         # Persist for crash recovery
         try:
             with open(SLEEP_STATE_FILE, 'w') as f:
-                json.dump({'screensaver_mode': mode, 'volume': vol}, f)
+                json.dump({'screensaver_mode': mode, 'volume': vol,
+                           'screen_action': self._screen_action}, f)
         except IOError:
             pass
-        # Apply sleep screensaver (only if user enabled the dim-screen feature)
-        if ADDON.getSetting('sleep_dim_screen') != 'false':
-            sleep_mode = (ADDON.getSetting('sleep_screensaver_mode')
-                          or 'screensaver.xbmc.builtin.black')
-            if sleep_mode and sleep_mode != mode:
-                _jsonrpc('Settings.SetSettingValue',
-                         {'setting': 'screensaver.mode', 'value': sleep_mode})
-        xbmc.log('Koshelf: sleep mode entered (saved screensaver={!r}, '
-                 'volume={})'.format(mode, vol), xbmc.LOGINFO)
+        # For screensaver modes, swap the screensaver setting now so it's
+        # ready when we trigger it after idle.
+        ss_mode = self._SCREENSAVER_MODES.get(self._screen_action)
+        if ss_mode and ss_mode != mode:
+            _jsonrpc('Settings.SetSettingValue',
+                     {'setting': 'screensaver.mode', 'value': ss_mode})
+        xbmc.log('Koshelf: sleep mode entered (action={}, saved '
+                 'screensaver={!r}, volume={})'.format(
+                     self._screen_action, mode, vol), xbmc.LOGINFO)
 
     def _exit(self):
-        # Restore originals
+        """Restore screen and volume — called on cancel or manual stop."""
+        # Restore screensaver setting
         if self.original_screensaver_mode is not None:
-            _jsonrpc('Settings.SetSettingValue',
-                     {'setting': 'screensaver.mode',
-                      'value': self.original_screensaver_mode})
+            ss_mode = self._SCREENSAVER_MODES.get(self._screen_action)
+            if ss_mode:
+                _jsonrpc('Settings.SetSettingValue',
+                         {'setting': 'screensaver.mode',
+                          'value': self.original_screensaver_mode})
+        # Wake screen if we turned it off
+        if self._screen_action_fired:
+            if self._screen_action == 'screen_off_cec':
+                xbmc.executebuiltin('CECActivateSource')
+            elif self._screen_action == 'screen_off_android':
+                if xbmc.getCondVisibility('System.DPMSActive'):
+                    xbmc.executebuiltin('ToggleDPMS')
+        # Restore volume
         if self.original_volume is not None and not self.user_overrode_volume:
             _jsonrpc('Application.SetVolume',
                      {'volume': int(self.original_volume)})
@@ -294,8 +322,10 @@ class SleepModeController:
         self.original_volume = None
         self.last_applied_volume = None
         self.user_overrode_volume = False
+        self._screen_action_fired = False
 
     def _expire(self, player):
+        """Timer fired — stop playback, restore volume, leave screen dark."""
         xbmc.log('Koshelf: sleep timer expired, stopping playback',
                  xbmc.LOGINFO)
         try:
@@ -306,16 +336,31 @@ class SleepModeController:
             os.remove(SLEEP_FILE)
         except OSError:
             pass
-        display_off = ADDON.getSetting('sleep_display_off') == 'true'
-        # Restore *before* CEC standby so the volume restore JSON-RPC has
-        # a chance to land before the display goes to sleep.
-        self._exit()
-        if display_off:
-            xbmc.log('Koshelf: sending CEC standby', xbmc.LOGINFO)
-            xbmc.executebuiltin('CECStandby')
+        # Restore volume (silently — screen is dark, user is asleep)
+        if self.original_volume is not None and not self.user_overrode_volume:
+            _jsonrpc('Application.SetVolume',
+                     {'volume': int(self.original_volume)})
+        # Restore screensaver setting but don't wake screen
+        if self.original_screensaver_mode is not None:
+            ss_mode = self._SCREENSAVER_MODES.get(self._screen_action)
+            if ss_mode:
+                _jsonrpc('Settings.SetSettingValue',
+                         {'setting': 'screensaver.mode',
+                          'value': self.original_screensaver_mode})
+        try:
+            if os.path.exists(SLEEP_STATE_FILE):
+                os.remove(SLEEP_STATE_FILE)
+        except OSError:
+            pass
+        self.active = False
+        self.original_screensaver_mode = None
+        self.original_volume = None
+        self.last_applied_volume = None
+        self.user_overrode_volume = False
+        self._screen_action_fired = False
 
-    def _maybe_activate_screensaver(self):
-        if ADDON.getSetting('sleep_dim_screen') == 'false':
+    def _maybe_fire_screen_action(self):
+        if self._screen_action == 'none':
             return
         try:
             idle_thresh = int(ADDON.getSetting('sleep_idle_seconds'))
@@ -325,9 +370,29 @@ class SleepModeController:
             idle = xbmc.getGlobalIdleTime()
         except Exception:
             return
-        if idle >= idle_thresh and not xbmc.getCondVisibility(
-                'System.ScreenSaverActive'):
-            xbmc.executebuiltin('ActivateScreenSaver')
+
+        # If user interacted (idle dropped), allow re-firing
+        if idle < idle_thresh:
+            self._screen_action_fired = False
+            return
+
+        if self._screen_action_fired:
+            return
+
+        if self._screen_action in self._SCREENSAVER_MODES:
+            if not xbmc.getCondVisibility('System.ScreenSaverActive'):
+                xbmc.executebuiltin('ActivateScreenSaver')
+                self._screen_action_fired = True
+        elif self._screen_action == 'screen_off_cec':
+            xbmc.executebuiltin('CECStandby')
+            self._screen_action_fired = True
+            xbmc.log('Koshelf: sent CEC standby (idle={})'.format(idle),
+                     xbmc.LOGINFO)
+        elif self._screen_action == 'screen_off_android':
+            xbmc.executebuiltin('ToggleDPMS')
+            self._screen_action_fired = True
+            xbmc.log('Koshelf: toggled DPMS off (idle={})'.format(idle),
+                     xbmc.LOGINFO)
 
     def _maybe_ramp_volume(self, remaining):
         try:
@@ -338,9 +403,6 @@ class SleepModeController:
             return
         if self.user_overrode_volume:
             return
-        # Detect user volume override: current volume differs from what we
-        # last set. If so, back off — don't fight the user, and don't
-        # restore on cancel either (they want their new volume).
         cur = _jsonrpc('Application.GetProperties',
                        {'properties': ['volume']}).get('volume')
         if (self.last_applied_volume is not None and cur is not None

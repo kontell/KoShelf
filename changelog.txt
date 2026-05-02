@@ -1,3 +1,26 @@
+v0.20.0
+- Sleep timer screen options restructured: single "Screen action" setting
+  with five modes — Screensaver: Black, Screensaver: Dim, Screen off
+  (HDMI-CEC), Screen off (Android / Google TV), or None. Replaces the
+  previous dim toggle + screensaver picker + display-off checkbox.
+- Fix: screensaver no longer pulsates. The screen action now fires once
+  per idle period and only re-arms when the user interacts, instead of
+  repeatedly calling ActivateScreenSaver every 250 ms.
+- Fix: sleep_last_preset now has the required <control> tag for Kodi v22
+  (was causing repeated parse errors in the log).
+- Custom sleep timer shows a numeric keypad instead of a full text keyboard.
+- If a custom duration was previously used, it appears in the preset list
+  with "(last used)" and is preselected.
+- Fix: widget URLs with a trailing slash (e.g.
+  plugin://plugin.audio.koshelf/?action=continue_listening/) now route
+  correctly.
+- Remove the "Comment:" field from book and podcast episode info dialogs.
+  Descriptions are still shown via VideoPlayer's Plot field during playback.
+- Podcast directory items now have MusicInfoTag (title, artist, genres) and
+  cover art — the i (info) button works.
+- Author items now have MusicInfoTag (artist name, bio) — the i (info)
+  button works.
+
 v0.19.0
 - Sleep timer with screen-dim and volume ramp-down. While playing, the
   "Sleep timer" row in the Koshelf root menu opens a dialog with

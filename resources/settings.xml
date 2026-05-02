@@ -85,10 +85,19 @@
     </category>
     <category id="sleep" label="30200" help="30201">
       <group id="1">
-        <setting id="sleep_dim_screen" type="boolean" label="30210" help="30211">
+        <setting id="sleep_screen_action" type="string" label="30210" help="30211">
           <level>0</level>
-          <default>true</default>
-          <control type="toggle"/>
+          <default>screensaver_black</default>
+          <constraints>
+            <options>
+              <option label="30212">none</option>
+              <option label="30213">screensaver_black</option>
+              <option label="30214">screensaver_dim</option>
+              <option label="30215">screen_off_cec</option>
+              <option label="30216">screen_off_android</option>
+            </options>
+          </constraints>
+          <control type="spinner" format="string"/>
         </setting>
         <setting id="sleep_idle_seconds" type="integer" label="30220" help="30221">
           <level>0</level>
@@ -103,23 +112,7 @@
           </control>
           <dependencies>
             <dependency type="visible">
-              <condition setting="sleep_dim_screen">true</condition>
-            </dependency>
-          </dependencies>
-        </setting>
-        <setting id="sleep_screensaver_mode" type="string" label="30230" help="30231">
-          <level>0</level>
-          <default>screensaver.xbmc.builtin.black</default>
-          <constraints>
-            <options>
-              <option label="30232">screensaver.xbmc.builtin.black</option>
-              <option label="30233">screensaver.xbmc.builtin.dim</option>
-            </options>
-          </constraints>
-          <control type="spinner" format="string"/>
-          <dependencies>
-            <dependency type="visible">
-              <condition setting="sleep_dim_screen">true</condition>
+              <condition setting="sleep_screen_action" operator="isnot">none</condition>
             </dependency>
           </dependencies>
         </setting>
@@ -135,15 +128,10 @@
             <format>{} seconds</format>
           </control>
         </setting>
-        <setting id="sleep_display_off" type="boolean" label="30240" help="30241">
-          <level>0</level>
-          <default>false</default>
-          <control type="toggle"/>
-        </setting>
-        <setting id="sleep_last_preset" type="integer">
+        <setting id="sleep_last_preset" type="integer" visible="false">
           <level>0</level>
           <default>30</default>
-          <visible>false</visible>
+          <control type="edit" format="integer"/>
         </setting>
       </group>
     </category>

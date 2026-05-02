@@ -175,7 +175,6 @@ def add_playable(label, url, art=None, info=None, progress=None):
         li.setArt(art)
     if info:
         tag = li.getMusicInfoTag()
-        # Song-type tag gives the richest Info dialog (description visible).
         tag.setMediaType('song')
         if info.get('title'):
             tag.setTitle(info['title'])
@@ -185,10 +184,6 @@ def add_playable(label, url, art=None, info=None, progress=None):
             tag.setAlbum(info['album'])
         if info.get('duration'):
             tag.setDuration(int(info['duration']))
-        if info.get('comment'):
-            tag.setComment(info['comment'])
-        # InfoTagMusic has no setDateAdded; we drop added_at for music items.
-        # LastPlayed is supported — set it so SORT_METHOD_LASTPLAYED works.
         last = _epoch_to_str(info.get('last_played'))
         if last:
             tag.setLastPlayed(last)
@@ -429,19 +424,33 @@ def route_set_sleep_timer():
     timer_active = os.path.exists(SLEEP_FILE)
     options = []
     actions = []  # parallel list: 'cancel' | int minutes | 'eoc' | 'custom'
+    preselect = -1
     if timer_active:
         options.append('Cancel timer')
         actions.append('cancel')
+
+    # If last-used is a custom value not in presets, insert it
+    last_is_custom = last not in _SLEEP_PRESETS and last > 0
+    if last_is_custom:
+        options.append('{} minutes (last used)'.format(last))
+        actions.append(last)
+        preselect = len(options) - 1
+
     for m in _SLEEP_PRESETS:
-        suffix = ' (last used)' if m == last else ''
-        options.append('{} minutes{}'.format(m, suffix))
+        if m == last and not last_is_custom:
+            options.append('{} minutes (last used)'.format(m))
+            preselect = len(options) - 1
+        else:
+            options.append('{} minutes'.format(m))
         actions.append(m)
+
     options.append('End of chapter')
     actions.append('eoc')
     options.append('Custom...')
     actions.append('custom')
 
-    sel = xbmcgui.Dialog().select('Sleep timer', options)
+    sel = xbmcgui.Dialog().select('Sleep timer', options,
+                                  preselect=max(0, preselect))
     if sel < 0:
         xbmcplugin.endOfDirectory(HANDLE, succeeded=False, updateListing=False,
                                   cacheToDisc=False)
@@ -465,19 +474,17 @@ def route_set_sleep_timer():
             xbmc.executebuiltin('Notification(Sleep timer, '
                                 'End of chapter ({:.0f} min), 1500)'.format(mins))
     elif choice == 'custom':
-        kb = xbmc.Keyboard('', 'Sleep timer minutes')
-        kb.doModal()
-        if kb.isConfirmed():
+        result = xbmcgui.Dialog().numeric(0, 'Sleep timer minutes')
+        if result:
             try:
-                mins = float(kb.getText().strip())
+                mins = int(result)
             except ValueError:
                 mins = 0
             if mins > 0:
                 _arm_sleep_timer(mins)
-                if mins == int(mins):
-                    ADDON.setSetting('sleep_last_preset', str(int(mins)))
+                ADDON.setSetting('sleep_last_preset', str(mins))
                 xbmc.executebuiltin(
-                    'Notification(Sleep timer, Set for {:.0f} min, 1500)'.format(mins))
+                    'Notification(Sleep timer, Set for {} min, 1500)'.format(mins))
     else:
         # Numeric preset
         _arm_sleep_timer(choice)
@@ -535,8 +542,6 @@ def route_continue_listening(client):
                 'artist': meta.get('author', ''),
                 'album': podcast_title,
                 'duration': duration,
-                'comment': _sanitize_description(ep.get('description', '')),
-                'added_at': ep.get('addedAt') or ep.get('publishedAt'),
                 'last_played': (ep_progress or {}).get('lastUpdate'),
             }
             play_url = build_url(action='play_episode', item_id=item_id,
@@ -559,8 +564,6 @@ def route_continue_listening(client):
                 'artist': meta.get('authorName', ''),
                 'album': meta.get('seriesName', ''),
                 'duration': duration,
-                'comment': _sanitize_description(meta.get('description', '')),
-                'added_at': item.get('addedAt'),
                 'last_played': (item_progress or {}).get('lastUpdate'),
             }
             play_url = build_url(action='play_book', item_id=item_id)
@@ -677,8 +680,21 @@ def _add_library_item(client, item, media_type, library_id, progress_map=None):
     if media_type == 'podcast':
         num_eps = media.get('numEpisodes', 0)
         label = '{}  [COLOR gray]{} episodes[/COLOR]'.format(title, num_eps)
-        add_directory(label, action='podcast_episodes',
-                      item_id=item['id'], library_id=library_id)
+        url = build_url(action='podcast_episodes', item_id=item['id'],
+                        library_id=library_id)
+        li = xbmcgui.ListItem(label)
+        li.setIsFolder(True)
+        li.setArt(art)
+        tag = li.getMusicInfoTag()
+        tag.setMediaType('album')
+        tag.setTitle(title)
+        author = meta.get('author', '')
+        if author:
+            tag.setArtist(author)
+        genres = meta.get('genres')
+        if genres:
+            tag.setGenres(genres)
+        xbmcplugin.addDirectoryItem(HANDLE, url, li, isFolder=True)
     else:
         # Book — skip ebook-only items (no audio)
         if media.get('numAudioFiles', 0) == 0 and not media.get('duration'):
@@ -695,15 +711,10 @@ def _add_library_item(client, item, media_type, library_id, progress_map=None):
             label += '  [COLOR gray]{}[/COLOR]'.format(dur_str)
 
         info = {
-            # Suffix form keeps the progress visible in album/song views
-            # (which render InfoTag title) without prepending '[' which
-            # would reorder Kodi's title sort.
             'title': title + _progress_suffix(progress),
             'artist': author,
             'album': meta.get('seriesName', ''),
             'duration': duration,
-            'comment': _sanitize_description(meta.get('description', '')),
-            'added_at': item.get('addedAt'),
             'last_played': (progress or {}).get('lastUpdate'),
         }
         play_url = build_url(action='play_book', item_id=item['id'])
@@ -765,6 +776,12 @@ def route_authors_list(client, library_id):
         li.setIsFolder(True)
         if art:
             li.setArt(art)
+        tag = li.getMusicInfoTag()
+        tag.setMediaType('artist')
+        tag.setArtist(name)
+        description = author.get('description', '')
+        if description:
+            tag.setComment(_sanitize_description(description))
         xbmcplugin.addDirectoryItem(HANDLE, url, li, isFolder=True)
 
     _apply_sorts(_NAME_SORTS, content='files')
@@ -841,8 +858,6 @@ def route_podcast_episodes(client, item_id, library_id):
             'title': ep_title + _progress_suffix(ep_progress),
             'album': podcast_title,
             'duration': duration,
-            'comment': _sanitize_description(ep.get('description', '')),
-            'added_at': ep.get('addedAt') or ep.get('publishedAt'),
             'last_played': (ep_progress or {}).get('lastUpdate'),
         }
         play_url = build_url(action='play_episode', item_id=item_id,
@@ -885,8 +900,6 @@ def route_recent_episodes(client, library_id):
             'title': ep_title + suffix,
             'album': podcast_title,
             'duration': duration,
-            'comment': _sanitize_description(ep.get('description', '')),
-            'added_at': ep.get('addedAt') or ep.get('publishedAt'),
             'last_played': (ep_progress or {}).get('lastUpdate'),
         }
         play_url = build_url(action='play_episode', item_id=item_id,
@@ -1186,7 +1199,7 @@ def router():
     if not client:
         return
 
-    action = args.get('action', '')
+    action = args.get('action', '').rstrip('/')
 
     if not action:
         route_root(client)
