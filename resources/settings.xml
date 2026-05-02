@@ -128,9 +128,10 @@
             <format>{} seconds</format>
           </control>
         </setting>
-        <setting id="sleep_last_preset" type="integer" visible="false">
+        <setting id="sleep_last_preset" type="integer">
           <level>0</level>
           <default>30</default>
+          <visible>false</visible>
           <control type="edit" format="integer"/>
         </setting>
       </group>

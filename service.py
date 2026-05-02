@@ -12,6 +12,7 @@ import xbmcvfs
 from abs_api import ABSClient
 
 ADDON = xbmcaddon.Addon()
+ADDON_PATH = xbmcvfs.translatePath(ADDON.getAddonInfo('path'))
 PROFILE_DIR = xbmcvfs.translatePath(ADDON.getAddonInfo('profile'))
 SESSION_FILE = os.path.join(PROFILE_DIR, 'session.json')
 SPEEDS_FILE = os.path.join(PROFILE_DIR, 'speeds.json')
@@ -150,8 +151,28 @@ def _jsonrpc(method, params=None):
         return {}
 
 
+class _ScreenOverlay(xbmcgui.WindowDialog):
+    """Full-screen black or dim overlay. Bypasses Kodi's screensaver system
+    entirely — works even during VideoPlayer playback (which inhibits the
+    normal screensaver)."""
+
+    _BLACK_IMG = os.path.join(ADDON_PATH, 'resources', 'black.png')
+
+    def __init__(self, dim=False):
+        super().__init__()
+        color = 'CC000000' if dim else 'FF000000'
+        try:
+            w = int(xbmcgui.getScreenWidth())
+            h = int(xbmcgui.getScreenHeight())
+        except (AttributeError, TypeError):
+            w, h = 1920, 1080
+        img = xbmcgui.ControlImage(0, 0, w, h, self._BLACK_IMG,
+                                   colorDiffuse=color)
+        self.addControl(img)
+
+
 class SleepModeController:
-    """Owns sleep-timer side effects: screen action, volume ramp-down,
+    """Owns sleep-timer side effects: screen overlay, volume ramp-down,
     and crash recovery.
 
     The controller is driven by the existence of SLEEP_FILE — main.py writes
@@ -160,26 +181,21 @@ class SleepModeController:
     When the file disappears (expiry or external cancel) we restore everything.
 
     Screen action modes (sleep_screen_action setting):
-      none             — don't touch the screen
-      screensaver_black — swap Kodi screensaver to black, activate after idle
-      screensaver_dim  — swap Kodi screensaver to dim, activate after idle
-      screen_off_cec   — send CEC standby after idle
-      screen_off_android — toggle DPMS after idle (Android/built-in display)
+      none              — don't touch the screen
+      screensaver_black — full-screen black overlay after idle
+      screensaver_dim   — semi-transparent black overlay after idle
+      screen_off_cec    — send CEC standby after idle
+      screen_off_android — toggle DPMS after idle (Linux/Android)
     """
-
-    _SCREENSAVER_MODES = {
-        'screensaver_black': 'screensaver.xbmc.builtin.black',
-        'screensaver_dim': 'screensaver.xbmc.builtin.dim',
-    }
 
     def __init__(self):
         self.active = False
-        self.original_screensaver_mode = None
         self.original_volume = None
         self.last_applied_volume = None
         self.user_overrode_volume = False
         self._screen_action_fired = False
         self._screen_action = 'none'
+        self._overlay = None
         if os.path.exists(SLEEP_STATE_FILE) and not os.path.exists(SLEEP_FILE):
             self._restore_from_state_file()
 
@@ -187,10 +203,6 @@ class SleepModeController:
         try:
             with open(SLEEP_STATE_FILE) as f:
                 state = json.load(f)
-            mode = state.get('screensaver_mode')
-            if mode:
-                _jsonrpc('Settings.SetSettingValue',
-                         {'setting': 'screensaver.mode', 'value': mode})
             vol = state.get('volume')
             if vol is not None:
                 _jsonrpc('Application.SetVolume', {'volume': int(vol)})
@@ -266,48 +278,28 @@ class SleepModeController:
         self._screen_action_fired = False
         self._screen_action = (ADDON.getSetting('sleep_screen_action')
                                or 'screensaver_black')
-        # Save originals
-        mode = _jsonrpc('Settings.GetSettingValue',
-                        {'setting': 'screensaver.mode'}).get('value', '')
         vol = _jsonrpc('Application.GetProperties',
                        {'properties': ['volume']}).get('volume')
-        self.original_screensaver_mode = mode
         self.original_volume = vol
         self.last_applied_volume = vol
-        # Persist for crash recovery
         try:
             with open(SLEEP_STATE_FILE, 'w') as f:
-                json.dump({'screensaver_mode': mode, 'volume': vol,
+                json.dump({'volume': vol,
                            'screen_action': self._screen_action}, f)
         except IOError:
             pass
-        # For screensaver modes, swap the screensaver setting now so it's
-        # ready when we trigger it after idle.
-        ss_mode = self._SCREENSAVER_MODES.get(self._screen_action)
-        if ss_mode and ss_mode != mode:
-            _jsonrpc('Settings.SetSettingValue',
-                     {'setting': 'screensaver.mode', 'value': ss_mode})
-        xbmc.log('Koshelf: sleep mode entered (action={}, saved '
-                 'screensaver={!r}, volume={})'.format(
-                     self._screen_action, mode, vol), xbmc.LOGINFO)
+        xbmc.log('Koshelf: sleep mode entered (action={}, '
+                 'volume={})'.format(self._screen_action, vol), xbmc.LOGINFO)
 
     def _exit(self):
         """Restore screen and volume — called on cancel or manual stop."""
-        # Restore screensaver setting
-        if self.original_screensaver_mode is not None:
-            ss_mode = self._SCREENSAVER_MODES.get(self._screen_action)
-            if ss_mode:
-                _jsonrpc('Settings.SetSettingValue',
-                         {'setting': 'screensaver.mode',
-                          'value': self.original_screensaver_mode})
-        # Wake screen if we turned it off
+        self._close_overlay()
         if self._screen_action_fired:
             if self._screen_action == 'screen_off_cec':
                 xbmc.executebuiltin('CECActivateSource')
             elif self._screen_action == 'screen_off_android':
                 if xbmc.getCondVisibility('System.DPMSActive'):
                     xbmc.executebuiltin('ToggleDPMS')
-        # Restore volume
         if self.original_volume is not None and not self.user_overrode_volume:
             _jsonrpc('Application.SetVolume',
                      {'volume': int(self.original_volume)})
@@ -318,7 +310,6 @@ class SleepModeController:
             pass
         xbmc.log('Koshelf: sleep mode exited', xbmc.LOGINFO)
         self.active = False
-        self.original_screensaver_mode = None
         self.original_volume = None
         self.last_applied_volume = None
         self.user_overrode_volume = False
@@ -336,28 +327,30 @@ class SleepModeController:
             os.remove(SLEEP_FILE)
         except OSError:
             pass
-        # Restore volume (silently — screen is dark, user is asleep)
         if self.original_volume is not None and not self.user_overrode_volume:
             _jsonrpc('Application.SetVolume',
                      {'volume': int(self.original_volume)})
-        # Restore screensaver setting but don't wake screen
-        if self.original_screensaver_mode is not None:
-            ss_mode = self._SCREENSAVER_MODES.get(self._screen_action)
-            if ss_mode:
-                _jsonrpc('Settings.SetSettingValue',
-                         {'setting': 'screensaver.mode',
-                          'value': self.original_screensaver_mode})
+        # Leave overlay/screen-off in place — user is asleep. The overlay
+        # will be garbage-collected when the service restarts, and CEC/DPMS
+        # stays off until user input.
         try:
             if os.path.exists(SLEEP_STATE_FILE):
                 os.remove(SLEEP_STATE_FILE)
         except OSError:
             pass
         self.active = False
-        self.original_screensaver_mode = None
         self.original_volume = None
         self.last_applied_volume = None
         self.user_overrode_volume = False
         self._screen_action_fired = False
+
+    def _close_overlay(self):
+        if self._overlay is not None:
+            try:
+                self._overlay.close()
+            except Exception:
+                pass
+            self._overlay = None
 
     def _maybe_fire_screen_action(self):
         if self._screen_action == 'none':
@@ -371,18 +364,24 @@ class SleepModeController:
         except Exception:
             return
 
-        # If user interacted (idle dropped), allow re-firing
         if idle < idle_thresh:
-            self._screen_action_fired = False
+            if self._screen_action_fired:
+                # User interacted — dismiss overlay, allow re-fire
+                self._close_overlay()
+                self._screen_action_fired = False
             return
 
         if self._screen_action_fired:
             return
 
-        if self._screen_action in self._SCREENSAVER_MODES:
-            if not xbmc.getCondVisibility('System.ScreenSaverActive'):
-                xbmc.executebuiltin('ActivateScreenSaver')
-                self._screen_action_fired = True
+        if self._screen_action == 'screensaver_black':
+            self._overlay = _ScreenOverlay(dim=False)
+            self._overlay.show()
+            self._screen_action_fired = True
+        elif self._screen_action == 'screensaver_dim':
+            self._overlay = _ScreenOverlay(dim=True)
+            self._overlay.show()
+            self._screen_action_fired = True
         elif self._screen_action == 'screen_off_cec':
             xbmc.executebuiltin('CECStandby')
             self._screen_action_fired = True

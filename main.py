@@ -174,16 +174,18 @@ def add_playable(label, url, art=None, info=None, progress=None):
     if art:
         li.setArt(art)
     if info:
-        tag = li.getMusicInfoTag()
-        tag.setMediaType('song')
+        tag = li.getVideoInfoTag()
+        tag.setMediaType('musicvideo')
         if info.get('title'):
             tag.setTitle(info['title'])
         if info.get('artist'):
-            tag.setArtist(info['artist'])
+            tag.setArtists([info['artist']])
         if info.get('album'):
             tag.setAlbum(info['album'])
         if info.get('duration'):
             tag.setDuration(int(info['duration']))
+        if info.get('description'):
+            tag.setPlot(info['description'])
         last = _epoch_to_str(info.get('last_played'))
         if last:
             tag.setLastPlayed(last)
@@ -542,6 +544,7 @@ def route_continue_listening(client):
                 'artist': meta.get('author', ''),
                 'album': podcast_title,
                 'duration': duration,
+                'description': _sanitize_description(ep.get('description', '')),
                 'last_played': (ep_progress or {}).get('lastUpdate'),
             }
             play_url = build_url(action='play_episode', item_id=item_id,
@@ -564,6 +567,7 @@ def route_continue_listening(client):
                 'artist': meta.get('authorName', ''),
                 'album': meta.get('seriesName', ''),
                 'duration': duration,
+                'description': _sanitize_description(meta.get('description', '')),
                 'last_played': (item_progress or {}).get('lastUpdate'),
             }
             play_url = build_url(action='play_book', item_id=item_id)
@@ -685,12 +689,15 @@ def _add_library_item(client, item, media_type, library_id, progress_map=None):
         li = xbmcgui.ListItem(label)
         li.setIsFolder(True)
         li.setArt(art)
-        tag = li.getMusicInfoTag()
-        tag.setMediaType('album')
+        tag = li.getVideoInfoTag()
+        tag.setMediaType('musicvideo')
         tag.setTitle(title)
         author = meta.get('author', '')
         if author:
-            tag.setArtist(author)
+            tag.setArtists([author])
+        description = meta.get('description', '')
+        if description:
+            tag.setPlot(_sanitize_description(description))
         genres = meta.get('genres')
         if genres:
             tag.setGenres(genres)
@@ -715,6 +722,7 @@ def _add_library_item(client, item, media_type, library_id, progress_map=None):
             'artist': author,
             'album': meta.get('seriesName', ''),
             'duration': duration,
+            'description': _sanitize_description(meta.get('description', '')),
             'last_played': (progress or {}).get('lastUpdate'),
         }
         play_url = build_url(action='play_book', item_id=item['id'])
@@ -776,12 +784,13 @@ def route_authors_list(client, library_id):
         li.setIsFolder(True)
         if art:
             li.setArt(art)
-        tag = li.getMusicInfoTag()
-        tag.setMediaType('artist')
-        tag.setArtist(name)
+        tag = li.getVideoInfoTag()
+        tag.setMediaType('musicvideo')
+        tag.setTitle(name)
+        tag.setArtists([name])
         description = author.get('description', '')
         if description:
-            tag.setComment(_sanitize_description(description))
+            tag.setPlot(_sanitize_description(description))
         xbmcplugin.addDirectoryItem(HANDLE, url, li, isFolder=True)
 
     _apply_sorts(_NAME_SORTS, content='files')
@@ -858,6 +867,7 @@ def route_podcast_episodes(client, item_id, library_id):
             'title': ep_title + _progress_suffix(ep_progress),
             'album': podcast_title,
             'duration': duration,
+            'description': _sanitize_description(ep.get('description', '')),
             'last_played': (ep_progress or {}).get('lastUpdate'),
         }
         play_url = build_url(action='play_episode', item_id=item_id,
@@ -900,6 +910,7 @@ def route_recent_episodes(client, library_id):
             'title': ep_title + suffix,
             'album': podcast_title,
             'duration': duration,
+            'description': _sanitize_description(ep.get('description', '')),
             'last_played': (ep_progress or {}).get('lastUpdate'),
         }
         play_url = build_url(action='play_episode', item_id=item_id,
