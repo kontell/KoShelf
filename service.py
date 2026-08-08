@@ -12,16 +12,16 @@ import xbmcvfs
 from abs_api import ABSClient
 
 ADDON = xbmcaddon.Addon()
-ADDON_PATH = xbmcvfs.translatePath(ADDON.getAddonInfo('path'))
-PROFILE_DIR = xbmcvfs.translatePath(ADDON.getAddonInfo('profile'))
-SESSION_FILE = os.path.join(PROFILE_DIR, 'session.json')
-SPEEDS_FILE = os.path.join(PROFILE_DIR, 'speeds.json')
-SLEEP_FILE = os.path.join(PROFILE_DIR, 'sleep_timer')
-SLEEP_STATE_FILE = os.path.join(PROFILE_DIR, 'sleep_state.json')
-TOKEN_FILE = os.path.join(PROFILE_DIR, 'token.json')
-TEMPO_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo')
-CONFIG_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo_config')
-ACTIVE_FILE = xbmcvfs.translatePath('special://temp/inputstream_tempo_active')
+ADDON_PATH = xbmcvfs.translatePath(ADDON.getAddonInfo("path"))
+PROFILE_DIR = xbmcvfs.translatePath(ADDON.getAddonInfo("profile"))
+SESSION_FILE = os.path.join(PROFILE_DIR, "session.json")
+SPEEDS_FILE = os.path.join(PROFILE_DIR, "speeds.json")
+SLEEP_FILE = os.path.join(PROFILE_DIR, "sleep_timer")
+SLEEP_STATE_FILE = os.path.join(PROFILE_DIR, "sleep_state.json")
+TOKEN_FILE = os.path.join(PROFILE_DIR, "token.json")
+TEMPO_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo")
+CONFIG_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo_config")
+ACTIVE_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo_active")
 
 
 def _get_float(setting_id, default):
@@ -33,14 +33,14 @@ def _get_float(setting_id, default):
 
 def write_config():
     """Write {step, min, max} as JSON for speed.py to consume."""
-    step = _get_float('speed_step', 0.10)
-    lo = _get_float('min_speed', 1.0)
-    hi = _get_float('max_speed', 3.0)
+    step = _get_float("speed_step", 0.10)
+    lo = _get_float("min_speed", 1.0)
+    hi = _get_float("max_speed", 3.0)
     if lo > hi:
         lo, hi = 0.5, 5.0
     try:
-        with open(CONFIG_FILE, 'w') as f:
-            json.dump({'step': step, 'min': lo, 'max': hi}, f)
+        with open(CONFIG_FILE, "w") as f:
+            json.dump({"step": step, "min": lo, "max": hi}, f)
     except IOError:
         pass
 
@@ -48,7 +48,7 @@ def write_config():
 def load_session():
     try:
         if os.path.exists(SESSION_FILE):
-            with open(SESSION_FILE, 'r') as f:
+            with open(SESSION_FILE, "r") as f:
                 return json.load(f)
     except Exception:
         pass
@@ -75,26 +75,26 @@ def save_book_speed(item_id, speed):
     speeds = {}
     try:
         if os.path.exists(SPEEDS_FILE):
-            with open(SPEEDS_FILE, 'r') as f:
+            with open(SPEEDS_FILE, "r") as f:
                 speeds = json.load(f)
     except Exception:
         pass
     speeds[item_id] = speed
     os.makedirs(PROFILE_DIR, exist_ok=True)
-    with open(SPEEDS_FILE, 'w') as f:
+    with open(SPEEDS_FILE, "w") as f:
         json.dump(speeds, f)
 
 
 def get_client():
-    server_url = ADDON.getSetting('server_url')
-    username = ADDON.getSetting('username')
-    password = ADDON.getSetting('password')
+    server_url = ADDON.getSetting("server_url")
+    username = ADDON.getSetting("username")
+    password = ADDON.getSetting("password")
     if not server_url or not (username and password):
         return None
     try:
         if os.path.exists(TOKEN_FILE):
-            with open(TOKEN_FILE, 'r') as f:
-                cached = json.load(f).get('token', '')
+            with open(TOKEN_FILE, "r") as f:
+                cached = json.load(f).get("token", "")
                 if cached:
                     return ABSClient(server_url, token=cached)
     except Exception:
@@ -105,12 +105,12 @@ def get_client():
 def find_chapter(chapters, current_time):
     """Find the current chapter name given playback position in seconds."""
     for ch in chapters:
-        if ch.get('start', 0) <= current_time < ch.get('end', 0):
-            return ch.get('title', '')
-    return ''
+        if ch.get("start", 0) <= current_time < ch.get("end", 0):
+            return ch.get("title", "")
+    return ""
 
 
-def _close_active_session(client, session, label='session'):
+def _close_active_session(client, session, label="session"):
     """Sync + close an ABS session, but never sync position=0 over a valid
     resume point — playback may have failed to start (e.g. HTTP error),
     leaving last_time at 0 even though start_time was the user's bookmark.
@@ -119,35 +119,35 @@ def _close_active_session(client, session, label='session'):
     """
     if not (client and session):
         return
-    sid = session.get('session_id')
-    last = session.get('last_time', 0) or 0
-    start = session.get('start_time', 0) or 0
-    dur = session.get('duration', 0)
+    sid = session.get("session_id")
+    last = session.get("last_time", 0) or 0
+    start = session.get("start_time", 0) or 0
+    dur = session.get("duration", 0)
     try:
         if last < 5 and start > 30:
-            xbmc.log('Koshelf: skip sync on close ({} last={:.0f}s, '
-                     'start={:.0f}s — playback never resumed)'.format(
-                         label, last, start), xbmc.LOGINFO)
+            xbmc.log(
+                "Koshelf: skip sync on close ({} last={:.0f}s, "
+                "start={:.0f}s — playback never resumed)".format(label, last, start),
+                xbmc.LOGINFO,
+            )
         else:
             client.sync_session(sid, last, dur, 0)
         client.close_session(sid)
-        xbmc.log('Koshelf: closed {} {}'.format(label, sid), xbmc.LOGINFO)
+        xbmc.log("Koshelf: closed {} {}".format(label, sid), xbmc.LOGINFO)
     except Exception as e:
-        xbmc.log('Koshelf: error closing {}: {}'.format(label, e),
-                 xbmc.LOGWARNING)
+        xbmc.log("Koshelf: error closing {}: {}".format(label, e), xbmc.LOGWARNING)
 
 
 def _jsonrpc(method, params=None):
     """Run a JSON-RPC call and return the result dict (or {})."""
     try:
-        req = {'jsonrpc': '2.0', 'id': 1, 'method': method}
+        req = {"jsonrpc": "2.0", "id": 1, "method": method}
         if params is not None:
-            req['params'] = params
+            req["params"] = params
         resp = json.loads(xbmc.executeJSONRPC(json.dumps(req)))
-        return resp.get('result', {}) or {}
+        return resp.get("result", {}) or {}
     except Exception as e:
-        xbmc.log('Koshelf: JSON-RPC error ({}): {}'.format(method, e),
-                 xbmc.LOGWARNING)
+        xbmc.log("Koshelf: JSON-RPC error ({}): {}".format(method, e), xbmc.LOGWARNING)
         return {}
 
 
@@ -156,18 +156,17 @@ class _ScreenOverlay(xbmcgui.WindowDialog):
     entirely — works even during VideoPlayer playback (which inhibits the
     normal screensaver)."""
 
-    _BLACK_IMG = os.path.join(ADDON_PATH, 'resources', 'black.png')
+    _BLACK_IMG = os.path.join(ADDON_PATH, "resources", "black.png")
 
     def __init__(self, dim=False):
         super().__init__()
-        color = 'CC000000' if dim else 'FF000000'
+        color = "CC000000" if dim else "FF000000"
         try:
             w = int(xbmcgui.getScreenWidth())
             h = int(xbmcgui.getScreenHeight())
         except (AttributeError, TypeError):
             w, h = 1920, 1080
-        img = xbmcgui.ControlImage(0, 0, w, h, self._BLACK_IMG,
-                                   colorDiffuse=color)
+        img = xbmcgui.ControlImage(0, 0, w, h, self._BLACK_IMG, colorDiffuse=color)
         self.addControl(img)
 
 
@@ -194,7 +193,7 @@ class SleepModeController:
         self.last_applied_volume = None
         self.user_overrode_volume = False
         self._screen_action_fired = False
-        self._screen_action = 'none'
+        self._screen_action = "none"
         self._overlay = None
         if os.path.exists(SLEEP_STATE_FILE) and not os.path.exists(SLEEP_FILE):
             self._restore_from_state_file()
@@ -203,19 +202,19 @@ class SleepModeController:
         try:
             with open(SLEEP_STATE_FILE) as f:
                 state = json.load(f)
-            vol = state.get('volume')
+            vol = state.get("volume")
             if vol is not None:
-                _jsonrpc('Application.SetVolume', {'volume': int(vol)})
-            action = state.get('screen_action', '')
-            if action == 'screen_off_android':
-                if xbmc.getCondVisibility('System.DPMSActive'):
-                    xbmc.executebuiltin('ToggleDPMS')
+                _jsonrpc("Application.SetVolume", {"volume": int(vol)})
+            action = state.get("screen_action", "")
+            if action == "screen_off_android":
+                if xbmc.getCondVisibility("System.DPMSActive"):
+                    xbmc.executebuiltin("ToggleDPMS")
             os.remove(SLEEP_STATE_FILE)
-            xbmc.log('Koshelf: restored orphaned sleep-mode state',
-                     xbmc.LOGINFO)
+            xbmc.log("Koshelf: restored orphaned sleep-mode state", xbmc.LOGINFO)
         except Exception as e:
-            xbmc.log('Koshelf: error restoring sleep state: {}'.format(e),
-                     xbmc.LOGWARNING)
+            xbmc.log(
+                "Koshelf: error restoring sleep state: {}".format(e), xbmc.LOGWARNING
+            )
 
     def tick(self, player, win):
         """Poll once. Called from the service loop while playback is active.
@@ -229,7 +228,7 @@ class SleepModeController:
             self._enter()
         elif not sleep_file_exists and self.active:
             self._exit()
-            win.clearProperty('Koshelf.SleepTimerRemaining')
+            win.clearProperty("Koshelf.SleepTimerRemaining")
             return False
 
         if not self.active:
@@ -240,20 +239,19 @@ class SleepModeController:
                 end_time = float(f.read().strip())
         except Exception:
             self._exit()
-            win.clearProperty('Koshelf.SleepTimerRemaining')
+            win.clearProperty("Koshelf.SleepTimerRemaining")
             return False
 
         remaining = end_time - time.time()
 
         if remaining <= 0:
             self._expire(player)
-            win.clearProperty('Koshelf.SleepTimerRemaining')
+            win.clearProperty("Koshelf.SleepTimerRemaining")
             return True
 
         mins = int(remaining) // 60
         secs = int(remaining) % 60
-        win.setProperty('Koshelf.SleepTimerRemaining',
-                        '{}:{:02d}'.format(mins, secs))
+        win.setProperty("Koshelf.SleepTimerRemaining", "{}:{:02d}".format(mins, secs))
 
         self._maybe_fire_screen_action()
         self._maybe_ramp_volume(remaining)
@@ -270,45 +268,48 @@ class SleepModeController:
                 pass
         if self.active:
             self._exit()
-        win.clearProperty('Koshelf.SleepTimerRemaining')
+        win.clearProperty("Koshelf.SleepTimerRemaining")
 
     def _enter(self):
         self.active = True
         self.user_overrode_volume = False
         self._screen_action_fired = False
-        self._screen_action = (ADDON.getSetting('sleep_screen_action')
-                               or 'screensaver_black')
-        vol = _jsonrpc('Application.GetProperties',
-                       {'properties': ['volume']}).get('volume')
+        self._screen_action = (
+            ADDON.getSetting("sleep_screen_action") or "screensaver_black"
+        )
+        vol = _jsonrpc("Application.GetProperties", {"properties": ["volume"]}).get(
+            "volume"
+        )
         self.original_volume = vol
         self.last_applied_volume = vol
         try:
-            with open(SLEEP_STATE_FILE, 'w') as f:
-                json.dump({'volume': vol,
-                           'screen_action': self._screen_action}, f)
+            with open(SLEEP_STATE_FILE, "w") as f:
+                json.dump({"volume": vol, "screen_action": self._screen_action}, f)
         except IOError:
             pass
-        xbmc.log('Koshelf: sleep mode entered (action={}, '
-                 'volume={})'.format(self._screen_action, vol), xbmc.LOGINFO)
+        xbmc.log(
+            "Koshelf: sleep mode entered (action={}, "
+            "volume={})".format(self._screen_action, vol),
+            xbmc.LOGINFO,
+        )
 
     def _exit(self):
         """Restore screen and volume — called on cancel or manual stop."""
         self._close_overlay()
         if self._screen_action_fired:
-            if self._screen_action == 'screen_off_cec':
-                xbmc.executebuiltin('CECActivateSource')
-            elif self._screen_action == 'screen_off_android':
-                if xbmc.getCondVisibility('System.DPMSActive'):
-                    xbmc.executebuiltin('ToggleDPMS')
+            if self._screen_action == "screen_off_cec":
+                xbmc.executebuiltin("CECActivateSource")
+            elif self._screen_action == "screen_off_android":
+                if xbmc.getCondVisibility("System.DPMSActive"):
+                    xbmc.executebuiltin("ToggleDPMS")
         if self.original_volume is not None and not self.user_overrode_volume:
-            _jsonrpc('Application.SetVolume',
-                     {'volume': int(self.original_volume)})
+            _jsonrpc("Application.SetVolume", {"volume": int(self.original_volume)})
         try:
             if os.path.exists(SLEEP_STATE_FILE):
                 os.remove(SLEEP_STATE_FILE)
         except OSError:
             pass
-        xbmc.log('Koshelf: sleep mode exited', xbmc.LOGINFO)
+        xbmc.log("Koshelf: sleep mode exited", xbmc.LOGINFO)
         self.active = False
         self.original_volume = None
         self.last_applied_volume = None
@@ -317,8 +318,7 @@ class SleepModeController:
 
     def _expire(self, player):
         """Timer fired — stop playback, restore volume, leave screen dark."""
-        xbmc.log('Koshelf: sleep timer expired, stopping playback',
-                 xbmc.LOGINFO)
+        xbmc.log("Koshelf: sleep timer expired, stopping playback", xbmc.LOGINFO)
         try:
             player.stop()
         except Exception:
@@ -328,8 +328,7 @@ class SleepModeController:
         except OSError:
             pass
         if self.original_volume is not None and not self.user_overrode_volume:
-            _jsonrpc('Application.SetVolume',
-                     {'volume': int(self.original_volume)})
+            _jsonrpc("Application.SetVolume", {"volume": int(self.original_volume)})
         # Leave overlay/screen-off in place — user is asleep. The overlay
         # will be garbage-collected when the service restarts, and CEC/DPMS
         # stays off until user input.
@@ -353,10 +352,10 @@ class SleepModeController:
             self._overlay = None
 
     def _maybe_fire_screen_action(self):
-        if self._screen_action == 'none':
+        if self._screen_action == "none":
             return
         try:
-            idle_thresh = int(ADDON.getSetting('sleep_idle_seconds'))
+            idle_thresh = int(ADDON.getSetting("sleep_idle_seconds"))
         except (ValueError, TypeError):
             idle_thresh = 30
         try:
@@ -374,47 +373,51 @@ class SleepModeController:
         if self._screen_action_fired:
             return
 
-        if self._screen_action == 'screensaver_black':
+        if self._screen_action == "screensaver_black":
             self._overlay = _ScreenOverlay(dim=False)
             self._overlay.show()
             self._screen_action_fired = True
-        elif self._screen_action == 'screensaver_dim':
+        elif self._screen_action == "screensaver_dim":
             self._overlay = _ScreenOverlay(dim=True)
             self._overlay.show()
             self._screen_action_fired = True
-        elif self._screen_action == 'screen_off_cec':
-            xbmc.executebuiltin('CECStandby')
+        elif self._screen_action == "screen_off_cec":
+            xbmc.executebuiltin("CECStandby")
             self._screen_action_fired = True
-            xbmc.log('Koshelf: sent CEC standby (idle={})'.format(idle),
-                     xbmc.LOGINFO)
-        elif self._screen_action == 'screen_off_android':
-            xbmc.executebuiltin('ToggleDPMS')
+            xbmc.log("Koshelf: sent CEC standby (idle={})".format(idle), xbmc.LOGINFO)
+        elif self._screen_action == "screen_off_android":
+            xbmc.executebuiltin("ToggleDPMS")
             self._screen_action_fired = True
-            xbmc.log('Koshelf: toggled DPMS off (idle={})'.format(idle),
-                     xbmc.LOGINFO)
+            xbmc.log("Koshelf: toggled DPMS off (idle={})".format(idle), xbmc.LOGINFO)
 
     def _maybe_ramp_volume(self, remaining):
         try:
-            ramp = int(ADDON.getSetting('sleep_rampdown_seconds'))
+            ramp = int(ADDON.getSetting("sleep_rampdown_seconds"))
         except (ValueError, TypeError):
             ramp = 30
         if ramp <= 0 or remaining > ramp or self.original_volume is None:
             return
         if self.user_overrode_volume:
             return
-        cur = _jsonrpc('Application.GetProperties',
-                       {'properties': ['volume']}).get('volume')
-        if (self.last_applied_volume is not None and cur is not None
-                and cur != self.last_applied_volume):
-            xbmc.log('Koshelf: volume ramp backed off (user adjusted from '
-                     '{} to {})'.format(self.last_applied_volume, cur),
-                     xbmc.LOGINFO)
+        cur = _jsonrpc("Application.GetProperties", {"properties": ["volume"]}).get(
+            "volume"
+        )
+        if (
+            self.last_applied_volume is not None
+            and cur is not None
+            and cur != self.last_applied_volume
+        ):
+            xbmc.log(
+                "Koshelf: volume ramp backed off (user adjusted from "
+                "{} to {})".format(self.last_applied_volume, cur),
+                xbmc.LOGINFO,
+            )
             self.user_overrode_volume = True
             return
         target = max(0, int(round(self.original_volume * remaining / ramp)))
         if cur is None or target == cur:
             return
-        _jsonrpc('Application.SetVolume', {'volume': target})
+        _jsonrpc("Application.SetVolume", {"volume": target})
         self.last_applied_volume = target
 
 
@@ -439,18 +442,23 @@ def set_koshelf_properties(win, session_data, player, chapters):
     # Chapter display
     chapter_name = find_chapter(chapters, current_time)
     if chapter_name:
-        win.setProperty('Koshelf.ChapterName', chapter_name)
+        win.setProperty("Koshelf.ChapterName", chapter_name)
 
     # Now playing info from session
-    meta = session_data.get('media_metadata', {})
-    if meta.get('title'):
-        win.setProperty('Koshelf.NowPlaying.Title', meta['title'])
-    if meta.get('author'):
-        win.setProperty('Koshelf.NowPlaying.Author', meta['author'])
+    meta = session_data.get("media_metadata", {})
+    if meta.get("title"):
+        win.setProperty("Koshelf.NowPlaying.Title", meta["title"])
+    if meta.get("author"):
+        win.setProperty("Koshelf.NowPlaying.Author", meta["author"])
+
 
 def clear_koshelf_properties(win):
-    for prop in ('Koshelf.ChapterName', 'Koshelf.NowPlaying.Title',
-                 'Koshelf.NowPlaying.Author', 'Koshelf.SleepTimerRemaining'):
+    for prop in (
+        "Koshelf.ChapterName",
+        "Koshelf.NowPlaying.Title",
+        "Koshelf.NowPlaying.Author",
+        "Koshelf.SleepTimerRemaining",
+    ):
         win.clearProperty(prop)
 
 
@@ -461,7 +469,7 @@ def run():
 
     sync_interval = 30
     try:
-        sync_interval = int(ADDON.getSetting('sync_interval'))
+        sync_interval = int(ADDON.getSetting("sync_interval"))
     except (ValueError, TypeError):
         pass
 
@@ -477,7 +485,7 @@ def run():
     # if the user triggers keys before opening playback from Koshelf.
     write_config()
 
-    xbmc.log('Koshelf service started', xbmc.LOGINFO)
+    xbmc.log("Koshelf service started", xbmc.LOGINFO)
 
     # 0.25s poll keeps the resume-seek latency down once the stream is ready,
     # so the user hears as little of the pre-resume audio as possible.
@@ -490,16 +498,16 @@ def run():
         # the "Now playing" item without needing a manual re-entry.
         active_now = os.path.exists(ACTIVE_FILE)
         if active_now != last_active:
-            folder = xbmc.getInfoLabel('Container.FolderPath') or ''
-            if 'plugin.audio.koshelf' in folder:
-                xbmc.executebuiltin('Container.Refresh')
+            folder = xbmc.getInfoLabel("Container.FolderPath") or ""
+            if "plugin.audio.koshelf" in folder:
+                xbmc.executebuiltin("Container.Refresh")
             last_active = active_now
 
         # Handle settings change — refresh sync interval and tempo config.
         if monitor.settings_changed:
             monitor.settings_changed = False
             try:
-                sync_interval = int(ADDON.getSetting('sync_interval'))
+                sync_interval = int(ADDON.getSetting("sync_interval"))
             except (ValueError, TypeError):
                 pass
             # Refresh shared tempo config so speed.py sees new step/min/max.
@@ -510,7 +518,7 @@ def run():
         if not player.isPlaying():
             if active_session:
                 # Playback stopped — close the session
-                _close_active_session(client, active_session, 'session')
+                _close_active_session(client, active_session, "session")
                 active_session = None
                 client = None
                 chapters = []
@@ -529,22 +537,21 @@ def run():
         if not session_data:
             continue
 
-        session_id = session_data.get('session_id')
+        session_id = session_data.get("session_id")
         if not session_id:
             continue
 
         # New session detected
-        if not active_session or active_session.get('session_id') != session_id:
+        if not active_session or active_session.get("session_id") != session_id:
             # Close the previous session before tracking the new one
             if active_session:
-                _close_active_session(client, active_session, 'previous session')
+                _close_active_session(client, active_session, "previous session")
 
             active_session = session_data
-            chapters = session_data.get('chapters', [])
+            chapters = session_data.get("chapters", [])
             last_sync = time.time()
             client = get_client()
-            xbmc.log('Koshelf: tracking session {}'.format(session_id),
-                     xbmc.LOGINFO)
+            xbmc.log("Koshelf: tracking session {}".format(session_id), xbmc.LOGINFO)
 
         # Update Koshelf window properties (chapter, now playing)
         set_koshelf_properties(win, active_session, player, chapters)
@@ -554,9 +561,12 @@ def run():
 
         # Save per-book speed periodically (every 10s, if changed)
         now = time.time()
-        if ADDON.getSetting('per_book_speed') != 'false' and now - last_book_speed_save > 10:
+        if (
+            ADDON.getSetting("per_book_speed") != "false"
+            and now - last_book_speed_save > 10
+        ):
             last_book_speed_save = now
-            item_id = active_session.get('item_id')
+            item_id = active_session.get("item_id")
             if item_id:
                 current_tempo = read_tempo()
                 save_book_speed(item_id, current_tempo)
@@ -568,8 +578,8 @@ def run():
         if client:
             try:
                 current_time = player.getTime()
-                duration = active_session.get('duration', 0)
-                start_time = active_session.get('start_time', 0)
+                duration = active_session.get("duration", 0)
+                start_time = active_session.get("start_time", 0)
                 # Guard: don't overwrite a valid resume position with 0.
                 # Can happen if GetTime() hasn't caught up after an initial
                 # seek (e.g. m_currentPts not yet set in the inputstream).
@@ -577,24 +587,26 @@ def run():
                     continue
                 listened = now - last_sync
                 last_sync = now
-                active_session['last_time'] = current_time
+                active_session["last_time"] = current_time
                 client.sync_session(session_id, current_time, duration, listened)
-                xbmc.log('Koshelf: synced {:.0f}s/{:.0f}s'.format(
-                    current_time, duration), xbmc.LOGINFO)
+                xbmc.log(
+                    "Koshelf: synced {:.0f}s/{:.0f}s".format(current_time, duration),
+                    xbmc.LOGINFO,
+                )
             except Exception as e:
-                xbmc.log('Koshelf: sync error: {}'.format(e), xbmc.LOGWARNING)
+                xbmc.log("Koshelf: sync error: {}".format(e), xbmc.LOGWARNING)
 
     # Kodi is shutting down — close any active session and restore any
     # in-flight sleep-mode state so the user's screensaver/volume aren't
     # left on the sleep-mode values across a Kodi restart.
     if active_session:
-        _close_active_session(client, active_session, 'session on shutdown')
+        _close_active_session(client, active_session, "session on shutdown")
         clear_session()
     sleep_controller.on_playback_stopped(win)
     clear_koshelf_properties(win)
 
-    xbmc.log('Koshelf service stopped', xbmc.LOGINFO)
+    xbmc.log("Koshelf service stopped", xbmc.LOGINFO)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()
