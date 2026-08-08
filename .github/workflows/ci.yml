@@ -23,6 +23,11 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
+          # setup-python builds its cache key from requirements.txt or
+          # pyproject.toml by default and errors when it finds neither. This repo
+          # has requirements-dev.txt, so it has to be named. (kofin and
+          # music.restore pass without this only because they carry a pyproject.toml.)
+          cache-dependency-path: requirements-dev.txt
       - name: Install dependencies
         run: python -m pip install -r requirements-dev.txt
       - name: black --check
