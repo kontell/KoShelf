@@ -1,2 +1,9 @@
 __pycache__/
+*.py[cod]
+.venv/
+venv/
+.tox/
+.mypy_cache/
+.pytest_cache/
+dist/
 .claude/

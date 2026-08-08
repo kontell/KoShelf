@@ -1,56 +1,165 @@
+# Tag release: quality gate, build the install zip, draft a GitHub release
+# whose body is the top paragraph of changelog.txt. Mirrors
+# plugin.video.kofin release.yml (single zip — this addon is pure Python).
 name: Release
+
 on:
   push:
-    tags: ['v*']
+    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Skip release creation — run checks and build only"
+        type: boolean
+        default: false
 
+# Least privilege by default: check/package only read. The release job alone
+# needs write to create the draft. (Was contents: write at workflow level, which
+# handed the build matrix write access it never needed.)
 permissions:
-  contents: write
+  contents: read
 
 env:
-  app_id: plugin.audio.koshelf
+  PYTHON_VERSION: "3.11"
+  APP_ID: plugin.audio.koshelf
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  check:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: black
+            command: black --check --diff .
+          - name: compileall
+            command: python -m compileall -q main.py abs_api.py service.py tools/
     steps:
-      - name: Checkout addon
-        uses: actions/checkout@v5
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          # setup-python builds its cache key from requirements.txt or
+          # pyproject.toml by default and errors when it finds neither. This repo
+          # has requirements-dev.txt, so it has to be named. (kofin and
+          # music.restore pass without this only because they carry a pyproject.toml.)
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Run ${{ matrix.name }}
+        run: ${{ matrix.command }}
+
+  package:
+    name: package
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
 
       - name: Build zip
-        run: ./build.sh --output "${{ github.workspace }}/artifacts"
+        run: python3 tools/build.py dist
+
+      - name: Assert tag matches addon.xml version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 -c "
+          import xml.etree.ElementTree as ET
+          print(ET.parse('addon.xml').getroot().get('version'))
+          ")"
+          tag="${GITHUB_REF_NAME#v}"
+          echo "addon.xml version=$version  tag=$tag"
+          if [[ "$tag" != "$version" ]]; then
+            echo "tag v$tag does not match addon.xml version $version" >&2
+            exit 1
+          fi
+
+      - name: Warn if addon.xml <news> is stale
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This addon hand-maintains <news> in addon.xml, which is what Kodi
+          # shows when browsing the repository. Because it is present,
+          # generate_repo.py will NOT fall back to changelog.txt — so a <news>
+          # left at the previous version silently advertises the wrong release
+          # notes. A notice, not a failure: the wording is a judgement call.
+          version="$(python3 -c "
+          import xml.etree.ElementTree as ET
+          print(ET.parse('addon.xml').getroot().get('version'))
+          ")"
+          news="$(python3 -c "
+          import xml.etree.ElementTree as ET
+          node = ET.parse('addon.xml').getroot().find('.//news')
+          print((node.text or '').strip() if node is not None else '')
+          ")"
+          if [[ -n "$news" && "$news" != *"$version"* ]]; then
+            echo "::warning::addon.xml <news> does not mention $version — it is what the"\
+                 "repository shows when browsing, and it takes priority over changelog.txt."
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin.audio.koshelf-release-zip
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # draft GitHub release + asset upload
+    if: |
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download zip
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin.audio.koshelf-release-zip
+          path: dist
 
       - name: Get version and changelog
-        id: version
+        id: meta
+        shell: bash
         run: |
-          version=$(grep -oP '^\s+version="\K[^"]+' addon.xml)
-          echo "version=$version" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          version="$(python3 -c "
+          import xml.etree.ElementTree as ET
+          print(ET.parse('addon.xml').getroot().get('version'))
+          ")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "tag=$GITHUB_REF_NAME" >> $GITHUB_OUTPUT
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=v$version" >> $GITHUB_OUTPUT
+            echo "tag=v$version" >> "$GITHUB_OUTPUT"
           fi
-          # Extract latest changelog entry (first paragraph, blank-line terminated)
+          # First blank-line-delimited paragraph — same rule as plugin.video.kofin.
           if [[ -f changelog.txt ]]; then
-            changes=$(awk -v RS= 'NR==1' changelog.txt)
+            changes="$(awk -v RS= 'NR==1' changelog.txt)"
           else
             changes="Release $version"
           fi
-          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-          echo "changes<<$EOF" >> $GITHUB_OUTPUT
-          echo "$changes" >> $GITHUB_OUTPUT
-          echo "$EOF" >> $GITHUB_OUTPUT
+          EOF="$(dd if=/dev/urandom bs=15 count=1 status=none | base64)"
+          {
+            echo "changes<<$EOF"
+            echo "$changes"
+            echo "$EOF"
+          } >> "$GITHUB_OUTPUT"
+          ls -la dist/
 
-      - name: Create release
+      - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: ${{ env.app_id }} ${{ steps.version.outputs.version }}
-          body: ${{ steps.version.outputs.changes }}
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ env.APP_ID }} ${{ steps.meta.outputs.version }}
+          body: ${{ steps.meta.outputs.changes }}
           draft: true
-          files: artifacts/*.zip
+          files: dist/*.zip

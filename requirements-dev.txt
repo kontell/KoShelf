@@ -1,0 +1,8 @@
+Kodistubs==21.*
+# Pinned deliberately. An unpinned formatter in a CI gate means a black release
+# can turn the repo red overnight for reasons unrelated to any change here —
+# the same silent-breakage class the binary add-ons pin their runners against.
+# Bump this line on purpose, in its own commit, and add the reformat to
+# .git-blame-ignore-revs.
+black==26.5.1
+tox

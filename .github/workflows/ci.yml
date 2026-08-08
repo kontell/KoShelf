@@ -1,0 +1,128 @@
+# Quality gates + PR install zip. Shape mirrors plugin.video.kofin ci.yml:
+# this file is the every-PR gate; release.yml handles tags.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  black:
+    name: black
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          # setup-python builds its cache key from requirements.txt or
+          # pyproject.toml by default and errors when it finds neither. This repo
+          # has requirements-dev.txt, so it has to be named. (kofin and
+          # music.restore pass without this only because they carry a pyproject.toml.)
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: black --check
+        run: black --check --diff .
+
+  compileall:
+    name: compileall
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: compileall
+        # Replaces the py_compile block that used to live inside build.sh, so a
+        # syntax error fails its own Check rather than the packaging step.
+        # No mypy: see tox.ini for why, and what it would take to add.
+        run: python -m compileall -q main.py abs_api.py service.py tools/
+
+  assets:
+    name: assets
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Every referenced resource is present in the tree
+        # This is the gate that would have caught resources/black.png being
+        # absent from the shipped zip for the whole life of the sleep timer's
+        # "Screen off" mode. build.py now packages the whole tree so the class of
+        # bug is gone, but a path that is referenced and simply does not exist is
+        # still worth failing on.
+        run: |
+          python - <<'PY'
+          import pathlib, re, sys
+
+          root = pathlib.Path(".")
+          missing = []
+          # os.path.join(ADDON_PATH, 'resources', 'black.png') and friends: pick
+          # up the quoted segments after a resources marker.
+          pattern = re.compile(r"""['"]resources['"]\s*,\s*['"]([^'"]+)['"]""")
+          for src in root.glob("*.py"):
+              text = src.read_text(encoding="utf-8")
+              for name in pattern.findall(text):
+                  if not (root / "resources" / name).exists():
+                      missing.append(f"{src}: resources/{name}")
+          # Anything addon.xml declares as an asset must exist too.
+          addon = (root / "addon.xml").read_text(encoding="utf-8")
+          block = re.search(r"<assets>(.*?)</assets>", addon, re.DOTALL)
+          if block:
+              for _tag, path in re.findall(
+                  r"<(\w+)>\s*([^<]+?)\s*</\1>", block.group(1)
+              ):
+                  if not (root / path).exists():
+                      missing.append(f"addon.xml: {path}")
+          if missing:
+              sys.exit("referenced resources missing from the tree:\n  " + "\n  ".join(missing))
+          print("all referenced resources present")
+          PY
+
+  package:
+    name: package
+    # Independent of the gates so a style failure still yields an install zip.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build zip
+        run: python3 tools/build.py dist
+
+      - name: Name zip for this run
+        id: name
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          zips=(dist/plugin.audio.koshelf-*.zip)
+          if [[ ${#zips[@]} -ne 1 ]]; then
+            echo "expected exactly one zip in dist/, got: ${zips[*]:-none}" >&2
+            exit 1
+          fi
+          src="${zips[0]}"
+          base="$(basename "$src" .zip)"
+          sha7="$(echo "${{ github.sha }}" | cut -c1-7)"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            dest="dist/${base}-pr${{ github.event.pull_request.number }}-${sha7}.zip"
+          else
+            dest="dist/${base}-main-${sha7}.zip"
+          fi
+          mv "$src" "$dest"
+          echo "zip=$dest" >> "$GITHUB_OUTPUT"
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin.audio.koshelf-zip
+          path: ${{ steps.name.outputs.zip }}
+          retention-days: 14
+          if-no-files-found: error
