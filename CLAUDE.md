@@ -49,8 +49,18 @@ New format (`settings version="1"`) with string IDs in `resources/language/resou
 ## Build
 
 ```bash
-./build.sh                          # local build to ../builds/
-./build.sh --output /path/to/dir    # CI build
+tox                          # what CI gates on (black, compileall)
+black --check --diff .
+tools/build.py [OUTDIR]      # Kodi-installable zip (default ./dist)
+tools/dev-install.sh         # rsync into ~/.kodi/addons, bounce the service
 ```
 
-GitHub Actions: `build.yml` (every push), `release.yml` (on v* tag → draft release).
+`build.sh` is gone. It copied a hand-written list of seven paths into the zip, so anything added to the tree since was silently absent from every release — `resources/black.png`, which `_ScreenOverlay` draws for the sleep timer's "Screen off" mode, had never been in a published zip. `tools/build.py` walks the tree and excludes dev-only paths instead of listing what to include, so that class of bug is gone rather than fixed once. It is the same file as in the other Kontell add-ons.
+
+There is no mypy gate: strict over `main.py`/`abs_api.py`/`service.py` reports ~104 errors, nearly all missing annotations across main.py's 1200 lines. `tox.ini` records what adding it would take (start with `abs_api.py`).
+
+GitHub Actions:
+
+- `ci.yml` — every PR and push to `main`: `black`, `compileall`, an `assets` job that fails when a referenced resource is missing from the tree, and a `package` job uploading an installable PR zip.
+- `release.yml` — on a `v*` tag: re-runs the gates, asserts the tag matches `addon.xml`, drafts a release. It also warns when `addon.xml`'s hand-maintained `<news>` does not mention the version being released: `<news>` is what Kodi shows when browsing the repository, and because it is present `generate_repo.py` will *not* fall back to `changelog.txt`, so a stale one advertises the wrong notes.
+- `notify-repo.yml` — tells `repository.kontell` about a published release. Publish the draft yourself; a release published by a workflow using the default `GITHUB_TOKEN` raises no event.
