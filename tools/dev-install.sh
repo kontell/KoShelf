@@ -15,6 +15,7 @@ KODI_RPC="http://localhost:8080/jsonrpc"
 # added to this list would sit in the installed tree forever.
 rsync -a --delete --delete-excluded \
     --exclude '.git' --exclude '.github' --exclude '.gitignore' \
+    --exclude '.git-blame-ignore-revs' \
     --exclude '.venv' --exclude '.tox' \
     --exclude '__pycache__' --exclude '.mypy_cache' --exclude '.pytest_cache' \
     --exclude 'docs' --exclude 'tests' --exclude 'tools' --exclude 'dist' \

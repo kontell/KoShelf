@@ -52,6 +52,7 @@ EXCLUDE_TOP = {
     "pyproject.toml",
     "requirements-dev.txt",
     ".gitignore",
+    ".git-blame-ignore-revs",
     ".github",
     ".vscode",
     ".idea",
