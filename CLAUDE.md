@@ -1,66 +1,110 @@
 # Koshelf
 
-AudioBookShelf client for Kodi. Pure Python addon (`plugin.audio` + `<provides>audio</provides>`). VideoPlayer is selected at playback time via the ListItem's `VideoInfoTag` (mediaType `musicvideo`), not via `<provides>video</provides>` — that tag only controls whether the addon appears under Video add-ons in the browser, and including it makes the i (info) button no-op there because Kodi opens DialogVideoInfo instead of DialogMusicInfo.
+AudioBookShelf client for Kodi. Pure Python add-on — `plugin.audio` with
+`<provides>audio</provides>`.
 
-## Architecture
+## Kodi knowledge lives in kodi-drive
 
-- `main.py` — plugin entry point, routing, library browsing, playback resolution
-- `service.py` — background service for ABS session sync, chapter display, sleep timer, per-book speed tracking
-- `abs_api.py` — AudioBookShelf REST API client
+Shared Kodi knowledge is **not** in this file. Use the `kodi-drive:*` skills, or
+read `../kodi-drive/README.md`.
 
-## Sleep timer
+Directly relevant: `kodi-playback-resume` (which resume property each player core
+takes, and in what units), `kodi-paplayer`, `kodi-addon-manifest`,
+`kodi-idle-screensaver`, `kodi-python-runtime`, `kodi-addon-release`,
+`kodi-inputstream`.
 
-`SLEEP_FILE` (`special://profile/sleep_timer`) is the source of truth: main.py writes the wall-clock end-time when a timer is set, the service polls for the file. `SleepModeController` in `service.py` owns the side effects: on file-appearing it saves the current screensaver mode and volume to `sleep_state.json`, then watches `getGlobalIdleTime()` against `sleep_idle_seconds`. The `sleep_screen_action` setting controls what fires after idle: `screensaver_black`/`screensaver_dim` swap Kodi's screensaver and trigger it; `screen_off_cec` sends `CECStandby`; `screen_off_android` toggles DPMS; `none` does nothing. The action fires once per idle period (re-arms when user interacts). Volume ramps to zero over `sleep_rampdown_seconds` before expiry; if the user adjusts volume mid-ramp the controller backs off. On expiry: `player.stop()`, restore volume and screensaver setting, but leave screen dark (user's next interaction wakes it). On cancel/playback-stop: restore everything including waking the screen. `sleep_state.json` is the crash-recovery breadcrumb — if it exists at service start with no live SLEEP_FILE, restore the saved values.
+**Do not add generally-useful Kodi findings here** — contribute them to kodi-drive.
+This file holds only what is specific to *this* add-on.
+
+## Layout
+
+| Path | |
+|---|---|
+| `main.py` | plugin entry point, routing, browsing, playback resolution |
+| `service.py` | ABS session sync, chapter display, sleep timer, per-book speed |
+| `abs_api.py` | AudioBookShelf REST client |
 
 ## Playback pipeline
 
-1. `_resolve_playback()` creates an ABS play session, gets stream URL + resume position
-2. Reads the `player` setting (0 = VideoPlayer default, 1 = PAPlayer) and branches the ListItem setup
-3. Sets `inputstream` + tempo properties (`tempo`, `tempo_file`, `start_time`) for both branches
-4. VideoPlayer branch: `VideoInfoTag` (mediaType `musicvideo`) + `StartOffset` (ms) + `ResumeTime`/`TotalTime` (s)
-5. PAPlayer branch: `MusicInfoTag` + `audiobook_bookmark` (ms)
-6. `setResolvedUrl()` hands the ListItem to Kodi; the matching player core opens the stream via inputstream.tempo, which handles tempo processing
+1. `_resolve_playback()` creates an ABS play session, gets the stream URL and
+   resume position.
+2. Reads the `player` setting (0 = VideoPlayer, 1 = PAPlayer) and branches the
+   ListItem setup.
+3. Sets `inputstream` plus tempo properties (`tempo`, `tempo_file`, `start_time`)
+   on both branches.
+4. VideoPlayer branch: `VideoInfoTag` (mediaType `musicvideo`) + `StartOffset`
+   (ms) + `ResumeTime`/`TotalTime` (s).
+5. PAPlayer branch: `MusicInfoTag` + `audiobook_bookmark` (ms).
+6. `setResolvedUrl()` hands off; the matching core opens the stream via
+   `inputstream.tempo`.
 
-Both player cores route audio-only content to `WINDOW_VISUALISATION` — Kodi picks the fullscreen window from `IsPlayingAudio()`/`IsPlayingVideo()`, not the player core. The visible difference is which OSD info-labels populate (e.g. `Player.ChapterCount` is always 0 under PAPlayer) and which time-tracking path runs.
+**The `musicvideo` VideoInfoTag is what selects VideoPlayer**, not `<provides>`.
+This add-on deliberately does *not* declare `<provides>video</provides>` — see
+`kodi-addon-manifest` for what that would break.
 
-## Resume mechanism
+Both cores route audio-only content to `WINDOW_VISUALISATION`; the visible
+difference is which OSD infolabels populate. Details in `kodi-playback-resume`.
 
-Resume property differs by player:
-- **VideoPlayer**: `StartOffset` (milliseconds). Kodi consumes it via `CFileItem::SetStartOffset` and queues a `SeekTime` after demuxer open.
-- **PAPlayer**: `audiobook_bookmark` (milliseconds). Read in `QueueNextFileEx()`, converted to a frame offset, and applied in `ProcessStream()` before audio output begins.
+Requires `inputstream.tempo` 0.3.10+ (0.3.9 added VideoPlayer OSD content-time
+tracking; 0.3.10 fixed a startup crash on FFmpeg-6 Kodi builds with Opus/webm).
 
-In both modes Koshelf also sets `inputstream.tempo.start_time` (seconds). The C++ addon uses it to (a) pre-populate `m_currentPts` so `GetTime()` reads the resume position before the seek executes, and (b) arm a player-agnostic initial-seek hold that gates `DemuxRead` output until any `SeekTime > 100 ms` arrives — without this hold, the audio sink can play ~50 ms of pts=0 audio from the stream start before the resume seek lands. Requires inputstream.tempo 0.3.10+ (0.3.9 added VideoPlayer OSD content-time tracking via dynamic `ptsStart`; 0.3.10 also fixes a startup crash for FFmpeg-6 patched Kodi builds with Opus/webm sources).
+## Sleep timer
 
-## Speed control
+`SLEEP_FILE` (`special://profile/sleep_timer`) is the source of truth: `main.py`
+writes the wall-clock end time, the service polls for it.
 
-Speed settings (step, min, max) are written as JSON to `special://temp/inputstream_tempo_config`. inputstream.tempo's `speed.py` reads this for keyboard/dialog stepping. Per-book speeds are stored in `speeds.json` in the addon profile.
+`SleepModeController` in `service.py` owns the side effects. On the file appearing
+it saves the current screensaver mode and volume to `sleep_state.json`, then
+watches `getGlobalIdleTime()` against `sleep_idle_seconds`.
 
-## Sentinel file
+`sleep_screen_action` selects what fires after idle:
 
-`special://temp/inputstream_tempo_active` exists while tempo is the active inputstream. Controls:
-- Whether speed.py keys/dialog are active (no-ops otherwise)
-- Whether runner.py sets the `InputstreamTempo.Active` window property
-- Whether the "Now playing" root menu item appears
+| Value | |
+|---|---|
+| `screensaver_black` / `screensaver_dim` | swap Kodi's screensaver and trigger it |
+| `screen_off_cec` | `CECStandby` |
+| `screen_off_android` | DPMS toggle |
+| `none` | nothing |
 
-## Settings
+Fires once per idle period, re-arming on interaction. Volume ramps to zero over
+`sleep_rampdown_seconds`, backing off if the user adjusts it mid-ramp.
 
-New format (`settings version="1"`) with string IDs in `resources/language/resource.language.en_gb/strings.po`. Playback section first, General section second.
+On expiry: stop, restore volume and screensaver, leave the screen dark. On cancel
+or playback stop: restore everything including waking the screen.
+
+**`sleep_state.json` is the crash-recovery breadcrumb** — if it exists at service
+start with no live `SLEEP_FILE`, restore the saved values. `kodi-idle-screensaver`
+explains why that file is not optional.
+
+## Cross-add-on wiring
+
+- `special://temp/inputstream_tempo_config` — speed step/min/max as JSON, read by
+  `inputstream.tempo`'s `speed.py`.
+- `special://temp/inputstream_tempo_active` — sentinel; gates `speed.py`'s keys,
+  `runner.py`'s `InputstreamTempo.Active` window property, and the "Now playing"
+  root menu item.
+- `speeds.json` in the add-on profile — per-book speeds.
 
 ## Build
 
 ```bash
-tox                          # what CI gates on (black, compileall)
-black --check --diff .
-tools/build.py [OUTDIR]      # Kodi-installable zip (default ./dist)
-tools/dev-install.sh         # rsync into ~/.kodi/addons, bounce the service
+tox                       # what CI gates on: black, compileall
+tools/build.py [OUTDIR]   # Kodi-installable zip, default ./dist
+tools/dev-install.sh      # rsync into the addons dir, bounce the service
 ```
 
-`build.sh` is gone. It copied a hand-written list of seven paths into the zip, so anything added to the tree since was silently absent from every release — `resources/black.png`, which `_ScreenOverlay` draws for the sleep timer's "Screen off" mode, had never been in a published zip. `tools/build.py` walks the tree and excludes dev-only paths instead of listing what to include, so that class of bug is gone rather than fixed once. It is the same file as in the other Kontell add-ons.
+`tools/build.py` walks the tree and excludes dev-only paths. It replaced a
+`build.sh` that copied a hand-written list of seven paths — `resources/black.png`,
+which the sleep timer's screen-off overlay draws, had never been in a published
+zip. `kodi-addon-release` covers why include-lists fail this way.
 
-There is no mypy gate: strict over `main.py`/`abs_api.py`/`service.py` reports ~104 errors, nearly all missing annotations across main.py's 1200 lines. `tox.ini` records what adding it would take (start with `abs_api.py`).
+No mypy gate: strict over the three modules reports ~104 errors, nearly all
+missing annotations across `main.py`'s 1200 lines. `tox.ini` records what adding
+it would take — start with `abs_api.py`.
 
-GitHub Actions:
+Workflows: `ci.yml` (black, compileall, an `assets` job that fails on a referenced
+resource missing from the tree, and a PR zip), `release.yml`, `notify-repo.yml`.
 
-- `ci.yml` — every PR and push to `main`: `black`, `compileall`, an `assets` job that fails when a referenced resource is missing from the tree, and a `package` job uploading an installable PR zip.
-- `release.yml` — on a `v*` tag: re-runs the gates, asserts the tag matches `addon.xml`, drafts a release. It also warns when `addon.xml`'s hand-maintained `<news>` does not mention the version being released: `<news>` is what Kodi shows when browsing the repository, and because it is present `generate_repo.py` will *not* fall back to `changelog.txt`, so a stale one advertises the wrong notes.
-- `notify-repo.yml` — tells `repository.kontell` about a published release. Publish the draft yourself; a release published by a workflow using the default `GITHUB_TOKEN` raises no event.
+`release.yml` warns when `addon.xml`'s hand-maintained `<news>` does not mention
+the version being released — because `<news>` is present, the repo generator will
+not fall back to `changelog.txt`, so a stale one advertises the wrong notes.
