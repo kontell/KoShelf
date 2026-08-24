@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="plugin.audio.koshelf"
        name="Koshelf"
-       version="0.22.0"
+       version="0.23.0"
        provider-name="kontell">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
@@ -22,9 +22,10 @@
     <summary lang="en">AudioBookShelf client for Kodi</summary>
     <description lang="en">Browse and play audiobooks and podcasts from your AudioBookShelf server.</description>
     <license>MIT</license>
-    <news>v0.22.0 Browsing is about five times faster: the root menu went from 0.91 s to 0.18 s and Authors from 1.08 s to 0.09 s. requests is replaced by a standard-library HTTP client (its import alone cost 0.5-1.2 s on every folder you opened), interpreter reuse is enabled, the pointless token-check round trip per listing is gone, and the progress map and API client are cached between invocations.</news>
+    <news>v0.23.0 Browsing overhaul. The sort menu actually works now — Kodi was silently re-sorting the server-sorted page alphabetically. The picker moved to the context menu and there are more sorts. In-progress items carry a real resume point instead of "[42%]" in the title, so skins draw their own progress indicator and Kodi offers Resume. Every folder has an icon. Narrator, duration, genre and year moved into the info tag. Missing covers show a placeholder. Added fan art. Removed the unsupported Music player option.</news>
     <assets>
       <icon>resources/icon.png</icon>
+      <fanart>resources/fanart.jpg</fanart>
     </assets>
   </extension>
 </addon>

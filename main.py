@@ -137,11 +137,72 @@ def build_url(**kwargs):
     return "{}?{}".format(BASE_URL, urlencode(kwargs))
 
 
-def add_directory(label, **kwargs):
+# Kodi resolves a bare "DefaultX.png" out of whichever skin is running, so
+# these match the user's theme instead of fighting it and nothing needs to be
+# shipped. All of them were checked against a live skin before being used
+# here; two obvious-looking names were rejected in the process:
+# DefaultAddonAudio.png draws a clapperboard (it is the add-on *category*
+# icon) and DefaultTVShows.png draws a television, which is not a book series.
+#
+# Only routes with no Kodi equivalent fall back to a bundled Material Symbol.
+_ACTION_ICONS = {
+    "continue_listening": "DefaultMusicRecentlyPlayed.png",
+    "library": "DefaultMusicAlbums.png",
+    "library_items": "DefaultMusicAlbums.png",
+    "podcast_items": "DefaultAddonLyrics.png",
+    "series_list": "DefaultSets.png",
+    "series_detail": "DefaultSets.png",
+    "authors_list": "DefaultMusicArtists.png",
+    "author_books": "DefaultMusicArtists.png",
+    "collections_list": "DefaultMusicPlaylists.png",
+    "collection_detail": "DefaultMusicPlaylists.png",
+    "podcast_episodes": "DefaultAddonLyrics.png",
+    "recent_episodes": "DefaultRecentlyAddedEpisodes.png",
+    "search": "DefaultMusicSearch.png",
+    "settings": "DefaultAddonService.png",
+    "speed_dialog": "DefaultMusicSongs.png",
+    "set_sleep_timer": "DefaultAddonScreensaver.png",
+}
+
+ICON_DIR = os.path.join(
+    xbmcvfs.translatePath(ADDON.getAddonInfo("path")), "resources", "icons"
+)
+# Material Symbols (Apache-2.0), for the three things Kodi has no icon for.
+ICON_SORT = os.path.join(ICON_DIR, "sort.png")
+ICON_NEXT = os.path.join(ICON_DIR, "navigate_next.png")
+ICON_LOGIN = os.path.join(ICON_DIR, "login.png")
+
+# Shown for an item whose cover the server does not have.
+FALLBACK_COVER = os.path.join(
+    xbmcvfs.translatePath(ADDON.getAddonInfo("path")), "resources", "ABS-Default.png"
+)
+
+
+def _cover_art(client, item, item_id=None):
+    """Artwork for a library item, falling back to the bundled placeholder.
+
+    cover_url() returns a URL whether or not the server has a cover, so an
+    item without one used to render as a broken image. ABS reports what it
+    has in coverPath.
+    """
+    item_id = item_id or item["id"]
+    has_cover = bool(item.get("media", {}).get("coverPath") or item.get("coverPath"))
+    cover = client.cover_url(item_id) if has_cover else FALLBACK_COVER
+    return {"thumb": cover, "poster": cover, "icon": cover, "fanart": cover}
+
+
+def set_icon(li, icon):
+    """Set both icon and thumb: views differ in which one they draw."""
+    if icon:
+        li.setArt({"icon": icon, "thumb": icon})
+
+
+def add_directory(label, icon=None, **kwargs):
     """Add a navigable folder item."""
     url = build_url(**kwargs)
     li = xbmcgui.ListItem(label)
     li.setIsFolder(True)
+    set_icon(li, icon or _ACTION_ICONS.get(kwargs.get("action", "")))
     xbmcplugin.addDirectoryItem(HANDLE, url, li, isFolder=True)
 
 
@@ -222,13 +283,22 @@ def _epoch_to_str(ms_or_s):
         return ""
 
 
-def add_playable(label, url, art=None, info=None, progress=None):
-    """Add a playable audio item."""
+def add_playable(label, url, art=None, info=None, progress=None, context=None):
+    """Add a playable audio item.
+
+    Facts go in the info tag, not in the label. Which of the two a skin draws
+    varies — Contuary's list view renders ListItem.Title and ignores the label
+    entirely, so the narrator and duration that used to be formatted into the
+    label were invisible there, while the duration passed as a tag got its own
+    right-aligned column for free.
+    """
     li = xbmcgui.ListItem(label)
     li.setIsFolder(False)
     li.setProperty("IsPlayable", "true")
     if art:
         li.setArt(art)
+    if context:
+        li.addContextMenuItems(context)
     if info:
         tag = li.getVideoInfoTag()
         tag.setMediaType("musicvideo")
@@ -242,10 +312,53 @@ def add_playable(label, url, art=None, info=None, progress=None):
             tag.setDuration(int(info["duration"]))
         if info.get("description"):
             tag.setPlot(info["description"])
+        if info.get("narrator"):
+            # Narrator is to an audiobook what a writer is to an episode, and
+            # it is the field skins already have a place for.
+            tag.setWriters([info["narrator"]])
+        if info.get("genres"):
+            tag.setGenres(info["genres"])
+        year = _year_of(info.get("year"))
+        if year:
+            tag.setYear(year)
         last = _epoch_to_str(info.get("last_played"))
         if last:
             tag.setLastPlayed(last)
+        _set_resume(tag, info, progress)
     xbmcplugin.addDirectoryItem(HANDLE, url, li, isFolder=False)
+
+
+def _year_of(value):
+    """ABS publishedYear is not always a year.
+
+    It is whatever the metadata source put there — "2024", "2024-12-17", and
+    empty are all real. Take the first four digits or give up; setYear() on a
+    date string raises and takes the whole listing down with it.
+    """
+    if not value:
+        return None
+    match = re.match(r"\s*(\d{4})", str(value))
+    return int(match.group(1)) if match else None
+
+
+def _set_resume(tag, info, progress):
+    """Give Kodi a real resume point rather than writing "[42%]" in the title.
+
+    The old label prefix sorted before every plain title (a bracket sorts
+    before A), which is why Continue Listening had to be left server-ordered
+    and the library used a suffix instead. A resume point costs none of that:
+    skins draw their own in-progress indicator from it, and Kodi offers
+    Resume / Start from beginning without being asked.
+    """
+    if not progress:
+        return
+    if progress.get("isFinished"):
+        tag.setPlaycount(1)
+        return
+    total = float(info.get("duration") or 0)
+    current = float(progress.get("currentTime") or 0)
+    if total > 0 and 0 < current < total:
+        tag.setResumePoint(current, total)
 
 
 # Server-side sort options for the ABS library-items endpoint. Each entry
@@ -256,11 +369,17 @@ _SORT_OPTIONS = (
     ("Title (A-Z)", "media.metadata.titleIgnorePrefix", False, "both"),
     ("Title (Z-A)", "media.metadata.titleIgnorePrefix", True, "both"),
     ("Author (A-Z)", "media.metadata.authorNameLF", False, "book"),
+    ("Author (Z-A)", "media.metadata.authorNameLF", True, "book"),
+    ("Narrator (A-Z)", "media.metadata.narratorName", False, "book"),
+    ("Series", "media.metadata.seriesName", False, "book"),
     ("Recently added", "addedAt", True, "both"),
+    ("Oldest added", "addedAt", False, "both"),
     ("Recently updated", "updatedAt", True, "both"),
     ("Duration (shortest)", "media.duration", False, "book"),
     ("Duration (longest)", "media.duration", True, "book"),
     ("Published year (new)", "media.metadata.publishedYear", True, "book"),
+    ("Published year (old)", "media.metadata.publishedYear", False, "book"),
+    ("Size (largest)", "size", True, "both"),
     ("Random", "random", False, "both"),
 )
 _DEFAULT_SORT = "media.metadata.titleIgnorePrefix"
@@ -273,36 +392,35 @@ def _sort_label(sort_key, desc):
     return ""
 
 
-# Sort menu presets — kept near the top so every route is consistent.
-_BOOK_SORTS = (
-    xbmcplugin.SORT_METHOD_TITLE,
-    xbmcplugin.SORT_METHOD_ARTIST,
-    xbmcplugin.SORT_METHOD_ALBUM,
-    xbmcplugin.SORT_METHOD_DURATION,
-    xbmcplugin.SORT_METHOD_NONE,
-)
+# One sorting system, not two. These listings arrive already sorted by the
+# server, across every page — which is the only place a 137-book library can
+# be sorted correctly, since Kodi's own methods only reorder the page in hand.
+#
+# Registering anything else here silently overrode the picker: with
+# SORT_METHOD_TITLE first, asking for "Recently added" returned the right
+# page and then Kodi re-sorted it alphabetically, and Container.SortMethod
+# read "Title" while the sort menu said otherwise.
+_SERVER_SORTED = (xbmcplugin.SORT_METHOD_UNSORTED,)
 
-_CONTINUE_SORTS = (
-    # NONE first => items appear in the order ABS returns them (last played
-    # descending). Kodi can't default its own sort to descending from Python,
-    # so we rely on server order as the default.
-    xbmcplugin.SORT_METHOD_NONE,
-    xbmcplugin.SORT_METHOD_LASTPLAYED,
-    xbmcplugin.SORT_METHOD_TITLE,
-    xbmcplugin.SORT_METHOD_ARTIST,
-    xbmcplugin.SORT_METHOD_DURATION,
-)
-
+# Client-side sorting is fine where the whole set is already in hand.
 _EPISODE_SORTS = (
+    xbmcplugin.SORT_METHOD_UNSORTED,
     xbmcplugin.SORT_METHOD_TITLE,
     xbmcplugin.SORT_METHOD_DURATION,
-    xbmcplugin.SORT_METHOD_NONE,
 )
 
 _NAME_SORTS = (
+    xbmcplugin.SORT_METHOD_UNSORTED,
     xbmcplugin.SORT_METHOD_LABEL,
-    xbmcplugin.SORT_METHOD_NONE,
 )
+
+
+# A menu of folders is not a content type. setContent(handle, "files") hands
+# the listing to the skin's file view, which draws its own folder icon and
+# ignores the one the item carries — every row came out as the same grey
+# folder. An empty content type leaves the art alone, which is what
+# plugin.video.kofin does for the same reason.
+CONTENT_MENU = ""
 
 
 def _apply_sorts(methods, content="albums"):
@@ -310,46 +428,6 @@ def _apply_sorts(methods, content="albums"):
     xbmcplugin.setContent(HANDLE, content)
     for m in methods:
         xbmcplugin.addSortMethod(HANDLE, m)
-
-
-def _progress_prefix(progress):
-    """Label prefix like '[42%] ' for an in-progress item, empty otherwise.
-
-    Used by Continue Listening, where the progress indicator leads the
-    title. Hides sub-1% noise (artifact of stray plays).
-    """
-    if not progress:
-        return ""
-    pct = progress.get("progress", 0) * 100
-    if pct < 1:
-        return ""
-    return "[{:.0f}%] ".format(pct)
-
-
-def _progress_suffix(progress):
-    """Label suffix like ' [42%]' for library listings.
-
-    Leading '[42%] ' sorted before plain titles (bracket < A), clustering
-    in-progress items together. With the indicator trailing the title,
-    Kodi's SORT_METHOD_TITLE orders by the real title.
-    """
-    if not progress:
-        return ""
-    pct = progress.get("progress", 0) * 100
-    if pct < 1:
-        return ""
-    return " [{:.0f}%]".format(pct)
-
-
-def format_duration(seconds):
-    """Format seconds as 'Xh Ym'."""
-    if not seconds:
-        return ""
-    h = int(seconds) // 3600
-    m = (int(seconds) % 3600) // 60
-    if h > 0:
-        return "{}h {}m".format(h, m)
-    return "{}m".format(m)
 
 
 # ── Route handlers ──
@@ -382,15 +460,24 @@ def route_root(client):
     # Libraries at root level
     libraries = client.get_libraries()
     for lib in libraries:
+        media_type = lib.get("mediaType", "book")
         add_directory(
             lib["name"],
+            icon=_ACTION_ICONS[
+                "podcast_items" if media_type == "podcast" else "library"
+            ],
             action="library",
             library_id=lib["id"],
-            media_type=lib["mediaType"],
+            media_type=media_type,
         )
 
     # Settings
     add_directory("[COLOR gray]Settings[/COLOR]", action="settings")
+
+    # Without these the root inherits whatever sort the view last remembered
+    # — it was displaying "Sort by: Date" on a menu that has no dates, and
+    # reordering itself accordingly.
+    _apply_sorts((xbmcplugin.SORT_METHOD_UNSORTED,), content=CONTENT_MENU)
 
     # Don't cache the root so the "Now playing" row appears/disappears
     # correctly when the user returns from playback.
@@ -598,8 +685,7 @@ def route_continue_listening(client):
         media_type = item.get("mediaType", "book")
         item_id = item["id"]
 
-        cover = client.cover_url(item_id)
-        art = {"thumb": cover, "poster": cover, "fanart": cover}
+        art = _cover_art(client, item, item_id=item_id)
 
         if media_type == "podcast":
             # Show the specific in-progress episode, not the podcast folder
@@ -615,10 +701,7 @@ def route_continue_listening(client):
             progress_key = "{}-{}".format(item_id, ep_id)
             ep_progress = all_progress.get(progress_key)
 
-            # Put progress in the title so it's visible in album-style views
-            # (label is often hidden there). Prefix form here — this view is
-            # server-sorted by last-played so the leading '[' doesn't reorder.
-            display_title = _progress_prefix(ep_progress) + ep_title
+            display_title = ep_title
 
             info = {
                 "title": display_title,
@@ -642,9 +725,7 @@ def route_continue_listening(client):
             duration = media.get("duration", 0)
             item_progress = all_progress.get(item_id)
 
-            # Prefix form — this view is ordered server-side, so the leading
-            # '[' doesn't reorder.
-            display_title = _progress_prefix(item_progress) + title
+            display_title = title
 
             info = {
                 "title": display_title,
@@ -659,7 +740,9 @@ def route_continue_listening(client):
                 display_title, play_url, art=art, info=info, progress=item_progress
             )
 
-    _apply_sorts(_CONTINUE_SORTS)
+    # ABS returns these last-played first, which is the order that makes
+    # sense here and the one Kodi cannot express as a default.
+    _apply_sorts(_SERVER_SORTED)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -681,6 +764,7 @@ def route_library(client, library_id, media_type):
     elif media_type == "podcast":
         add_directory(
             "All Podcasts",
+            icon=_ACTION_ICONS["podcast_items"],
             action="library_items",
             library_id=library_id,
             media_type=media_type,
@@ -692,6 +776,7 @@ def route_library(client, library_id, media_type):
             "Search", action="search", library_id=library_id, media_type=media_type
         )
 
+    _apply_sorts((xbmcplugin.SORT_METHOD_UNSORTED,), content=CONTENT_MENU)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -717,21 +802,17 @@ def route_library_items(client, library_id, media_type, page=0, sort=None, desc=
     total = data.get("total", 0)
     progress_map = get_progress_map(client)
 
-    # Sort picker at the top (page 0 only — on later pages it would just
-    # be visual noise and "replace" the history stack awkwardly).
-    if page == 0:
-        label = _sort_label(sort, desc) or "default"
-        add_directory(
-            "[COLOR gray][ Sort: {} ][/COLOR]".format(label),
-            action="sort_library_items",
-            library_id=library_id,
-            media_type=media_type,
-            sort=sort,
-            desc="1" if desc else "0",
-        )
+    # The sort picker lives on the context menu, not in the list. As a list
+    # item it was a row that sorted into position among the books, appeared
+    # only on page one, and had to be scrolled past on every visit. On the
+    # context menu it is on every item and every page, which is where a
+    # "change how this folder is sorted" control belongs.
+    sort_menu = _sort_context_item(library_id, media_type, sort, desc)
 
     for item in results:
-        _add_library_item(client, item, media_type, library_id, progress_map)
+        _add_library_item(
+            client, item, media_type, library_id, progress_map, context=[sort_menu]
+        )
 
     # Next page — preserve sort/desc so pagination stays consistent.
     if (page + 1) * limit < total:
@@ -748,15 +829,37 @@ def route_library_items(client, library_id, media_type, page=0, sort=None, desc=
             "[COLOR yellow]Next page ({}/{})[/COLOR]".format(
                 page + 2, (total + limit - 1) // limit
             ),
+            icon=ICON_NEXT,
             **next_args
         )
 
-    _apply_sorts(_BOOK_SORTS)
+    xbmcplugin.setPluginCategory(HANDLE, _sort_label(sort, desc) or "Default order")
+    _apply_sorts(_SERVER_SORTED)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
+def _sort_context_item(library_id, media_type, sort, desc):
+    """('Sort: Recently added', RunPlugin(...)) for a listing's context menu."""
+    return (
+        "Sort: {}".format(_sort_label(sort, desc) or "default"),
+        "RunPlugin({})".format(
+            build_url(
+                action="sort_library_items",
+                library_id=library_id,
+                media_type=media_type,
+                sort=sort,
+                desc="1" if desc else "0",
+            )
+        ),
+    )
+
+
 def route_sort_library_items(library_id, media_type, current_sort, current_desc):
-    """Dialog picker for the library_items sort; reloads view with new sort."""
+    """Sort picker for a library listing, reached from the context menu.
+
+    Invoked with RunPlugin, so there is no directory handle to close and no
+    listing to replace — Container.Update does the reload.
+    """
     options = [o for o in _SORT_OPTIONS if o[3] in (media_type, "both")]
     labels = [o[0] for o in options]
     preselect = 0
@@ -766,9 +869,6 @@ def route_sort_library_items(library_id, media_type, current_sort, current_desc)
             break
     choice = xbmcgui.Dialog().select("Sort by", labels, preselect=preselect)
     if choice < 0:
-        xbmcplugin.endOfDirectory(
-            HANDLE, succeeded=False, updateListing=False, cacheToDisc=False
-        )
         return
     _, sort_key, desc, _ = options[choice]
     url = build_url(
@@ -780,18 +880,16 @@ def route_sort_library_items(library_id, media_type, current_sort, current_desc)
     )
     # replace=true so the picker action doesn't clutter the back-stack.
     xbmc.executebuiltin("Container.Update({},replace)".format(url))
-    xbmcplugin.endOfDirectory(
-        HANDLE, succeeded=False, updateListing=False, cacheToDisc=False
-    )
 
 
-def _add_library_item(client, item, media_type, library_id, progress_map=None):
+def _add_library_item(
+    client, item, media_type, library_id, progress_map=None, context=None
+):
     """Add a single book or podcast to the directory listing."""
     media = item.get("media", {})
     meta = media.get("metadata", {})
     title = meta.get("title", "Unknown")
-    cover = client.cover_url(item["id"])
-    art = {"thumb": cover, "poster": cover, "fanart": cover}
+    art = _cover_art(client, item)
     progress = (progress_map or {}).get(item["id"]) if progress_map else None
 
     if media_type == "podcast":
@@ -803,6 +901,8 @@ def _add_library_item(client, item, media_type, library_id, progress_map=None):
         li = xbmcgui.ListItem(label)
         li.setIsFolder(True)
         li.setArt(art)
+        if context:
+            li.addContextMenuItems(context)
         tag = li.getVideoInfoTag()
         tag.setMediaType("musicvideo")
         tag.setTitle(title)
@@ -821,26 +921,21 @@ def _add_library_item(client, item, media_type, library_id, progress_map=None):
         if media.get("numAudioFiles", 0) == 0 and not media.get("duration"):
             return
         duration = media.get("duration", 0)
-        narrator = meta.get("narratorName", "")
-        author = meta.get("authorName", "")
-        dur_str = format_duration(duration)
-
-        label = title + _progress_suffix(progress)
-        if narrator:
-            label += "  [I]{}[/I]".format(narrator)
-        if dur_str:
-            label += "  [COLOR gray]{}[/COLOR]".format(dur_str)
-
         info = {
-            "title": title + _progress_suffix(progress),
-            "artist": author,
+            "title": title,
+            "artist": meta.get("authorName", ""),
             "album": meta.get("seriesName", ""),
+            "narrator": meta.get("narratorName", ""),
             "duration": duration,
+            "genres": meta.get("genres"),
+            "year": meta.get("publishedYear"),
             "description": _sanitize_description(meta.get("description", "")),
             "last_played": (progress or {}).get("lastUpdate"),
         }
         play_url = build_url(action="play_book", item_id=item["id"])
-        add_playable(label, play_url, art=art, info=info)
+        add_playable(
+            title, play_url, art=art, info=info, progress=progress, context=context
+        )
 
 
 def route_series_list(client, library_id, page=0):
@@ -865,12 +960,13 @@ def route_series_list(client, library_id, page=0):
     if (page + 1) * limit < total:
         add_directory(
             "[COLOR yellow]Next page[/COLOR]",
+            icon=ICON_NEXT,
             action="series_list",
             library_id=library_id,
             page=page + 1,
         )
 
-    _apply_sorts(_NAME_SORTS, content="files")
+    _apply_sorts(_NAME_SORTS, content=CONTENT_MENU)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -884,7 +980,7 @@ def route_series_detail(client, library_id, series_id):
         progress_map = get_progress_map(client)
         for item in data.get("results", []):
             _add_library_item(client, item, "book", library_id, progress_map)
-    _apply_sorts(_BOOK_SORTS)
+    _apply_sorts(_SERVER_SORTED)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -895,9 +991,11 @@ def route_authors_list(client, library_id):
         name = author.get("name", "Unknown")
         count = author.get("numBooks", 0)
         label = "{}  [COLOR gray]{} books[/COLOR]".format(name, count)
-        art = {}
         if author.get("imagePath"):
-            art = {"thumb": client.author_image_url(author["id"])}
+            image = client.author_image_url(author["id"])
+        else:
+            image = _ACTION_ICONS["authors_list"]
+        art = {"thumb": image, "poster": image, "icon": image}
         url = build_url(
             action="author_books",
             library_id=library_id,
@@ -906,8 +1004,7 @@ def route_authors_list(client, library_id):
         )
         li = xbmcgui.ListItem(label)
         li.setIsFolder(True)
-        if art:
-            li.setArt(art)
+        li.setArt(art)
         tag = li.getVideoInfoTag()
         tag.setMediaType("musicvideo")
         tag.setTitle(name)
@@ -917,7 +1014,7 @@ def route_authors_list(client, library_id):
             tag.setPlot(_sanitize_description(description))
         xbmcplugin.addDirectoryItem(HANDLE, url, li, isFolder=True)
 
-    _apply_sorts(_NAME_SORTS, content="files")
+    _apply_sorts(_NAME_SORTS, content=CONTENT_MENU)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -931,7 +1028,7 @@ def route_author_books(client, library_id, author_id, author_name):
         progress_map = get_progress_map(client)
         for item in data.get("results", []):
             _add_library_item(client, item, "book", library_id, progress_map)
-    _apply_sorts(_BOOK_SORTS)
+    _apply_sorts(_SERVER_SORTED)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -948,7 +1045,7 @@ def route_collections_list(client, library_id):
             library_id=library_id,
             collection_id=col["id"],
         )
-    _apply_sorts(_NAME_SORTS, content="files")
+    _apply_sorts(_NAME_SORTS, content=CONTENT_MENU)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -959,7 +1056,7 @@ def route_collection_detail(client, library_id, collection_id):
         progress_map = get_progress_map(client)
         for item in data.get("books", []):
             _add_library_item(client, item, "book", library_id, progress_map)
-    _apply_sorts(_BOOK_SORTS)
+    _apply_sorts(_SERVER_SORTED)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -975,6 +1072,8 @@ def route_podcast_episodes(client, item_id, library_id):
     podcast_title = meta.get("title", "")
     episodes = media.get("episodes", [])
     progress_map = get_progress_map(client)
+    # One lookup: every episode of a podcast shows the show's cover.
+    podcast_art = _cover_art(client, data, item_id=item_id)
 
     # Sort by most recent first
     episodes.sort(key=lambda e: e.get("publishedAt", 0) or 0, reverse=True)
@@ -983,25 +1082,20 @@ def route_podcast_episodes(client, item_id, library_id):
         ep_id = ep.get("id", "")
         ep_title = ep.get("title", "Unknown Episode")
         duration = ep.get("audioFile", {}).get("duration", 0)
-        dur_str = format_duration(duration)
         ep_progress = progress_map.get("{}-{}".format(item_id, ep_id))
 
-        label = ep_title + _progress_suffix(ep_progress)
-        if dur_str:
-            label += "  [COLOR gray]{}[/COLOR]".format(dur_str)
-
-        cover = client.cover_url(item_id)
-        art = {"thumb": cover, "poster": cover, "fanart": cover}
+        art = podcast_art
         info = {
-            "title": ep_title + _progress_suffix(ep_progress),
+            "title": ep_title,
             "album": podcast_title,
             "duration": duration,
             "description": _sanitize_description(ep.get("description", "")),
             "last_played": (ep_progress or {}).get("lastUpdate"),
         }
         play_url = build_url(action="play_episode", item_id=item_id, episode_id=ep_id)
-        add_playable(label, play_url, art=art, info=info)
+        add_playable(ep_title, play_url, art=art, info=info, progress=ep_progress)
 
+    # Already sorted newest-first above; UNSORTED keeps that as the default.
     _apply_sorts(_EPISODE_SORTS)
     xbmcplugin.endOfDirectory(HANDLE)
 
@@ -1021,28 +1115,25 @@ def route_recent_episodes(client, library_id):
         ep_title = ep.get("title", "Unknown")
         podcast_title = ep.get("audioFile", {}).get("metaTags", {}).get("tagAlbum", "")
         duration = ep.get("audioFile", {}).get("duration", 0)
-        dur_str = format_duration(duration)
         ep_progress = progress_map.get("{}-{}".format(item_id, ep_id))
 
-        suffix = _progress_suffix(ep_progress)
+        # The podcast name still leads the label here: this listing mixes
+        # shows, so the episode title alone is not enough to tell them apart.
         if podcast_title:
-            label = "[B]{}[/B] - {}{}".format(podcast_title, ep_title, suffix)
+            label = "[B]{}[/B] - {}".format(podcast_title, ep_title)
         else:
-            label = ep_title + suffix
-        if dur_str:
-            label += "  [COLOR gray]{}[/COLOR]".format(dur_str)
+            label = ep_title
 
-        cover = client.cover_url(item_id)
-        art = {"thumb": cover, "poster": cover, "fanart": cover}
+        art = _cover_art(client, ep.get("libraryItem") or {}, item_id=item_id)
         info = {
-            "title": ep_title + suffix,
+            "title": label,
             "album": podcast_title,
             "duration": duration,
             "description": _sanitize_description(ep.get("description", "")),
             "last_played": (ep_progress or {}).get("lastUpdate"),
         }
         play_url = build_url(action="play_episode", item_id=item_id, episode_id=ep_id)
-        add_playable(label, play_url, art=art, info=info)
+        add_playable(label, play_url, art=art, info=info, progress=ep_progress)
 
     _apply_sorts(_EPISODE_SORTS)
     xbmcplugin.endOfDirectory(HANDLE)
@@ -1098,7 +1189,7 @@ def route_search(client, library_id, media_type):
             item = entry.get("libraryItem", entry)
             _add_library_item(client, item, "podcast", library_id, progress_map)
 
-    _apply_sorts(_BOOK_SORTS if media_type == "book" else _NAME_SORTS)
+    _apply_sorts(_SERVER_SORTED if media_type == "book" else _NAME_SORTS)
     xbmcplugin.endOfDirectory(HANDLE)
 
 
@@ -1209,8 +1300,8 @@ def _resolve_playback(client, item_id, episode_id=None):
     # Whatever is about to play will have moved by the time the user is back
     # in a listing, so don't let the cached map outlive this.
     invalidate_progress_cache()
-    # Clear both queues so toggling the player setting between sessions
-    # doesn't leave stale items in the inactive queue.
+    # Both queues, still: a profile that used the old Music player setting can
+    # have items parked in the music playlist from before the switch.
     xbmc.PlayList(xbmc.PLAYLIST_MUSIC).clear()
     xbmc.PlayList(xbmc.PLAYLIST_VIDEO).clear()
 
@@ -1238,12 +1329,6 @@ def _resolve_playback(client, item_id, episode_id=None):
     duration = session.get("duration", 0)
     description = _sanitize_description(meta.get("description", ""))
 
-    # 0 = VideoPlayer (default), 1 = PAPlayer
-    try:
-        player_mode = int(ADDON.getSetting("player") or 0)
-    except ValueError:
-        player_mode = 0
-
     # Save session info for the background service (handles sync + resume seek)
     _save_session(
         {
@@ -1254,7 +1339,6 @@ def _resolve_playback(client, item_id, episode_id=None):
             "start_time": start_time,
             "started_at": time.time(),
             "chapters": session.get("chapters", []),
-            "player_mode": player_mode,
             "media_metadata": {
                 "title": title,
                 "author": author_str,
@@ -1295,31 +1379,19 @@ def _resolve_playback(client, item_id, episode_id=None):
 
     podcast_name = meta.get("title", "")
 
-    if player_mode == 0:
-        # VideoPlayer mode — mediaType=musicvideo routes the ListItem to
-        # VideoPlayer while still landing in WINDOW_VISUALISATION for
-        # audio-only content. VideoInfoTag fields populate the now-playing
-        # OSD and Info dialog under VideoPlayer.
-        vtag = li.getVideoInfoTag()
-        vtag.setTitle(title)
-        if author_str:
-            vtag.setArtists([author_str])
-        if episode_id and podcast_name:
-            vtag.setAlbum(podcast_name)
-        if description:
-            vtag.setPlot(description)
-        vtag.setDuration(int(duration))
-        vtag.setMediaType("musicvideo")
-    else:
-        tag = li.getMusicInfoTag()
-        tag.setTitle(title)
-        if author_str:
-            tag.setArtist(author_str)
-        if episode_id and podcast_name:
-            tag.setAlbum(podcast_name)
-        if description:
-            tag.setComment(description)
-        tag.setDuration(int(duration))
+    # mediaType=musicvideo routes the ListItem to VideoPlayer while still
+    # landing in WINDOW_VISUALISATION for audio-only content. VideoInfoTag
+    # fields populate the now-playing OSD and the Info dialog.
+    vtag = li.getVideoInfoTag()
+    vtag.setTitle(title)
+    if author_str:
+        vtag.setArtists([author_str])
+    if episode_id and podcast_name:
+        vtag.setAlbum(podcast_name)
+    if description:
+        vtag.setPlot(description)
+    vtag.setDuration(int(duration))
+    vtag.setMediaType("musicvideo")
 
     # Route through inputstream.tempo for playback speed control
     li.setProperty("inputstream", "inputstream.tempo")
@@ -1333,17 +1405,12 @@ def _resolve_playback(client, item_id, episode_id=None):
         # the addon that gates packet output until a real seek arrives, so
         # no pts=0 audio reaches the sink before the resume seek lands.
         li.setProperty("inputstream.tempo.start_time", str(start_time))
-        if player_mode == 0:
-            # VideoPlayer reads StartOffset (ms) and issues a SeekTime
-            # after demuxer open. ResumeTime/TotalTime keep the resume
-            # dialog and OSD progress consistent.
-            li.setProperty("StartOffset", str(int(start_time * 1000)))
-            li.setProperty("ResumeTime", str(int(start_time)))
-            li.setProperty("TotalTime", str(int(duration)))
-        else:
-            # PAPlayer reads audiobook_bookmark in QueueNextFileEx and
-            # sets m_seekFrame before audio output begins.
-            li.setProperty("audiobook_bookmark", str(int(start_time * 1000)))
+        # VideoPlayer reads StartOffset (ms) and issues a SeekTime after
+        # demuxer open. ResumeTime/TotalTime keep the resume dialog and OSD
+        # progress consistent.
+        li.setProperty("StartOffset", str(int(start_time * 1000)))
+        li.setProperty("ResumeTime", str(int(start_time)))
+        li.setProperty("TotalTime", str(int(duration)))
 
     xbmcplugin.setResolvedUrl(HANDLE, True, li)
 
