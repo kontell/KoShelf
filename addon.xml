@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="plugin.audio.koshelf"
        name="Koshelf"
-       version="0.21.0"
+       version="0.22.0"
        provider-name="kontell">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
-    <import addon="script.module.requests" version="2.31.0"/>
     <import addon="inputstream.tempo" minversion="0.3.10"/>
   </requires>
   <extension point="xbmc.python.pluginsource" library="main.py">
@@ -13,11 +12,17 @@
   </extension>
   <extension point="xbmc.service" library="service.py" start="login"/>
   <extension point="xbmc.addon.metadata">
+    <!-- Keeps the interpreter alive between invocations, so the import cost
+         is paid once instead of on every folder the user opens. It is parsed
+         here and nowhere else: under xbmc.python.pluginsource, where it reads
+         as though it belongs, it is silently ignored. Requires every route to
+         close its handle — see router() in main.py. -->
+    <reuselanguageinvoker>true</reuselanguageinvoker>
     <platform>all</platform>
     <summary lang="en">AudioBookShelf client for Kodi</summary>
     <description lang="en">Browse and play audiobooks and podcasts from your AudioBookShelf server.</description>
     <license>MIT</license>
-    <news>v0.21.0 Sleep timer: the screen overlay is gone — it could deadlock Kodi's UI after the timer expired, unrecoverably. The timer now uses Kodi's own screensaver and restores your screensaver settings afterwards. Screen off (HDMI-CEC) removed; the Android screen-off option is renamed to Linux/X11 only, which is where DPMS actually exists. New "Screensaver: my usual one" mode. Fixes: the idle-seconds setting dependency never parsed; Settings and unknown routes left their directory handle open; a trailing slash on any parameter but the last broke the route.</news>
+    <news>v0.22.0 Browsing is about five times faster: the root menu went from 0.91 s to 0.18 s and Authors from 1.08 s to 0.09 s. requests is replaced by a standard-library HTTP client (its import alone cost 0.5-1.2 s on every folder you opened), interpreter reuse is enabled, the pointless token-check round trip per listing is gone, and the progress map and API client are cached between invocations.</news>
     <assets>
       <icon>resources/icon.png</icon>
     </assets>

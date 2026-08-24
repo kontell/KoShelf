@@ -21,11 +21,21 @@ from abs_api import ABSClient
 
 ADDON = xbmcaddon.Addon()
 ADDON_ID = ADDON.getAddonInfo("id")
-try:
-    HANDLE = int(sys.argv[1])
-except (IndexError, ValueError):
-    HANDLE = -1
-BASE_URL = sys.argv[0]
+# Re-read per invocation, not frozen at import: with reuselanguageinvoker the
+# module outlives the invocation that loaded it, so anything derived from
+# sys.argv is stale on every call after the first. Stale here would mean
+# writing a listing to a handle that closed minutes ago.
+HANDLE = -1
+BASE_URL = ""
+
+
+def _refresh_invocation():
+    global HANDLE, BASE_URL
+    try:
+        HANDLE = int(sys.argv[1])
+    except (IndexError, ValueError):
+        HANDLE = -1
+    BASE_URL = sys.argv[0]
 
 
 TOKEN_FILE = os.path.join(
@@ -50,6 +60,12 @@ def _save_cached_token(token):
         json.dump({"token": token}, f)
 
 
+# ssl.create_default_context() loads the system CA bundle, which is not free,
+# and get_client() ran once per invocation. Keyed on what identifies a client,
+# so a re-login makes a new one rather than reusing a stale token.
+_client_cache = {"key": None, "client": None}
+
+
 def get_client():
     server_url = ADDON.getSetting("server_url")
     username = ADDON.getSetting("username")
@@ -66,16 +82,51 @@ def get_client():
         )
         ADDON.openSettings()
         return None
-    # Try the cached session token first; login fresh if missing/expired.
+    # Use the cached token without checking it first. The check used to be a
+    # get_libraries() call whose result was thrown away — a full round trip on
+    # every listing, and the root menu then fetched the same endpoint again a
+    # moment later. A token that has expired announces itself on the next real
+    # request; that is where it is handled.
     cached = _load_cached_token()
     if cached:
+        key = (server_url, cached)
+        if _client_cache["key"] == key and _client_cache["client"] is not None:
+            return _client_cache["client"]
         client = ABSClient(server_url, token=cached)
-        if client.get_libraries():
-            return client
+        _client_cache["key"] = key
+        _client_cache["client"] = client
+        return client
     client = ABSClient(server_url, username=username, password=password)
     if client.token:
         _save_cached_token(client.token)
+        _client_cache["key"] = (server_url, client.token)
+        _client_cache["client"] = client
     return client
+
+
+# Every listing route needs the progress map, and it arrives as the whole
+# /api/me document — 59 KB on a modest account. Under interpreter reuse the
+# parsed map outlives the invocation, so the second folder in a row is free.
+# Short TTL because the service writes progress back as playback runs.
+_PROGRESS_TTL = 30
+_progress_cache = {"at": 0.0, "map": None}
+
+
+def get_progress_map(client):
+    now = time.time()
+    if (
+        _progress_cache["map"] is not None
+        and now - _progress_cache["at"] < _PROGRESS_TTL
+    ):
+        return _progress_cache["map"]
+    progress = client.get_all_progress()
+    _progress_cache["at"] = now
+    _progress_cache["map"] = progress
+    return progress
+
+
+def invalidate_progress_cache():
+    _progress_cache["map"] = None
 
 
 def build_url(**kwargs):
@@ -539,7 +590,7 @@ def route_settings():
 def route_continue_listening(client):
     """Show items currently in progress - books and individual podcast episodes."""
     items = client.get_items_in_progress()
-    all_progress = client.get_all_progress()
+    all_progress = get_progress_map(client)
 
     for item in items:
         media = item.get("media", {})
@@ -664,7 +715,7 @@ def route_library_items(client, library_id, media_type, page=0, sort=None, desc=
 
     results = data.get("results", [])
     total = data.get("total", 0)
-    progress_map = client.get_all_progress()
+    progress_map = get_progress_map(client)
 
     # Sort picker at the top (page 0 only — on later pages it would just
     # be visual noise and "replace" the history stack awkwardly).
@@ -830,7 +881,7 @@ def route_series_detail(client, library_id, series_id):
     filter_str = "series." + b64encode(series_id.encode()).decode()
     data = client.get_library_items(library_id, limit=100, filter_str=filter_str)
     if data:
-        progress_map = client.get_all_progress()
+        progress_map = get_progress_map(client)
         for item in data.get("results", []):
             _add_library_item(client, item, "book", library_id, progress_map)
     _apply_sorts(_BOOK_SORTS)
@@ -877,7 +928,7 @@ def route_author_books(client, library_id, author_id, author_name):
     filter_str = "authors." + b64encode(author_id.encode()).decode()
     data = client.get_library_items(library_id, limit=100, filter_str=filter_str)
     if data:
-        progress_map = client.get_all_progress()
+        progress_map = get_progress_map(client)
         for item in data.get("results", []):
             _add_library_item(client, item, "book", library_id, progress_map)
     _apply_sorts(_BOOK_SORTS)
@@ -905,7 +956,7 @@ def route_collection_detail(client, library_id, collection_id):
     """Show books in a collection."""
     data = client._get("/api/collections/{}".format(collection_id))
     if data:
-        progress_map = client.get_all_progress()
+        progress_map = get_progress_map(client)
         for item in data.get("books", []):
             _add_library_item(client, item, "book", library_id, progress_map)
     _apply_sorts(_BOOK_SORTS)
@@ -923,7 +974,7 @@ def route_podcast_episodes(client, item_id, library_id):
     meta = media.get("metadata", {})
     podcast_title = meta.get("title", "")
     episodes = media.get("episodes", [])
-    progress_map = client.get_all_progress()
+    progress_map = get_progress_map(client)
 
     # Sort by most recent first
     episodes.sort(key=lambda e: e.get("publishedAt", 0) or 0, reverse=True)
@@ -962,7 +1013,7 @@ def route_recent_episodes(client, library_id):
         xbmcplugin.endOfDirectory(HANDLE)
         return
 
-    progress_map = client.get_all_progress()
+    progress_map = get_progress_map(client)
     episodes = data.get("episodes", [])
     for ep in episodes:
         item_id = ep.get("libraryItemId", "")
@@ -1015,7 +1066,7 @@ def route_search(client, library_id, media_type):
         xbmcplugin.endOfDirectory(HANDLE)
         return
 
-    progress_map = client.get_all_progress()
+    progress_map = get_progress_map(client)
     if media_type == "book":
         for entry in data.get("book", []):
             item = entry.get("libraryItem", entry)
@@ -1155,6 +1206,9 @@ def _save_book_speed(item_id, speed):
 
 def _resolve_playback(client, item_id, episode_id=None):
     """Create an ABS session and resolve the stream URL via inputstream.tempo."""
+    # Whatever is about to play will have moved by the time the user is back
+    # in a listing, so don't let the cached map outlive this.
+    invalidate_progress_cache()
     # Clear both queues so toggling the player setting between sessions
     # doesn't leave stale items in the inactive queue.
     xbmc.PlayList(xbmc.PLAYLIST_MUSIC).clear()
@@ -1307,6 +1361,7 @@ def route_play_episode(client, item_id, episode_id):
 
 def router():
     """Parse the plugin URL and dispatch to the right handler."""
+    _refresh_invocation()
     # Kodi writes library-node and favourite paths with a trailing slash, and
     # it lands on whichever query parameter comes last — not necessarily
     # 'action'. Stripping it off the action alone fixed only the routes that

@@ -1,16 +1,22 @@
 """AudioBookShelf API client."""
 
-import requests
 import xbmc
+
+from abs_http import Http, HttpError, Unauthorized, Unreachable
 
 
 class ABSClient:
     """Client for the AudioBookShelf REST API."""
 
-    def __init__(self, server_url, token=None, username=None, password=None):
+    def __init__(
+        self, server_url, token=None, username=None, password=None, verify=True
+    ):
         self.server_url = server_url.rstrip("/")
         self.token = token
-        self.session = requests.Session()
+        # Set by every request, so a caller can tell an expired token from an
+        # unreachable server without catching anything.
+        self.last_error = None
+        self.session = Http(verify=verify)
         if not self.token and username and password:
             self._login(username, password)
         if self.token:
@@ -22,40 +28,45 @@ class ABSClient:
         if resp and "user" in resp:
             self.token = resp["user"].get("token", "")
 
-    def _get(self, path, params=None):
-        url = self.server_url + path
-        try:
-            r = self.session.get(url, params=params, timeout=15)
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            xbmc.log("ABSClient GET {} failed: {}".format(path, e), xbmc.LOGERROR)
-            return None
+    def _request(self, method, path, params=None, json_body=None, headers=None):
+        """Return the decoded body, or None after logging why not.
 
-    def _post(self, path, json=None):
+        Callers are listing routes that have to render something either way,
+        so None is the useful answer. `last_error` carries the distinction for
+        the ones that care.
+        """
+        self.last_error = None
         url = self.server_url + path
         try:
-            r = self.session.post(url, json=json or {}, timeout=15)
-            r.raise_for_status()
-            ct = r.headers.get("content-type", "")
-            if "application/json" in ct and r.text:
-                return r.json()
-            return {}
-        except Exception as e:
-            xbmc.log("ABSClient POST {} failed: {}".format(path, e), xbmc.LOGERROR)
+            response = self.session.request(
+                method, url, params=params, json_body=json_body, headers=headers
+            )
+        except Unauthorized as error:
+            self.last_error = error
+            xbmc.log(
+                "ABSClient {} {} unauthorised".format(method, path), xbmc.LOGWARNING
+            )
             return None
+        except (HttpError, Unreachable) as error:
+            self.last_error = error
+            xbmc.log(
+                "ABSClient {} {} failed: {}".format(method, path, error), xbmc.LOGERROR
+            )
+            return None
+        try:
+            return response.json()
+        except ValueError:
+            # A 204, or a success with an empty body: both mean "it worked".
+            return {}
+
+    def _get(self, path, params=None):
+        return self._request("GET", path, params=params)
+
+    def _post(self, path, json=None, headers=None):
+        return self._request("POST", path, json_body=json or {}, headers=headers)
 
     def _patch(self, path, json=None):
-        url = self.server_url + path
-        try:
-            r = self.session.patch(url, json=json or {}, timeout=15)
-            r.raise_for_status()
-            if r.text:
-                return r.json()
-            return {}
-        except Exception as e:
-            xbmc.log("ABSClient PATCH {} failed: {}".format(path, e), xbmc.LOGERROR)
-            return None
+        return self._request("PATCH", path, json_body=json or {})
 
     # ── Libraries ──
 

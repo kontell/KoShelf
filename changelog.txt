@@ -1,3 +1,21 @@
+v0.22.0
+- Browsing is roughly five times faster. Every listing used to spend
+  0.8-1.6 s starting up before it did any work at all, most of it
+  "import requests" — measured on a desktop; an ARM box pays a multiple.
+  Root menu 0.91 s -> 0.18 s, Authors 1.08 s -> 0.09 s.
+- requests is replaced by a small standard-library HTTP transport. A plugin
+  invocation makes one to three calls and exits, so requests' connection
+  pooling never repaid its import cost. The script.module.requests
+  dependency is gone.
+- Interpreter reuse (reuselanguageinvoker) is on, which takes the startup
+  cost to zero on repeat invocations. Note that add-on code changes now
+  need a disable/enable bounce to take effect.
+- The cached token is no longer checked with a throwaway API call on every
+  single listing. An expired token is handled where it shows up instead.
+- The progress map (/api/me, ~59 KB) and the API client are cached between
+  invocations with a short TTL, so a second folder in a row is nearly free.
+  Responses are now gzipped.
+
 v0.21.0
 - Fix: the sleep timer could freeze Kodi outright. The full-screen overlay
   it drew was an xbmcgui.WindowDialog that _expire() deliberately left open;
