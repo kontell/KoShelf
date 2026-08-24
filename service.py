@@ -19,9 +19,44 @@ SPEEDS_FILE = os.path.join(PROFILE_DIR, "speeds.json")
 SLEEP_FILE = os.path.join(PROFILE_DIR, "sleep_timer")
 SLEEP_STATE_FILE = os.path.join(PROFILE_DIR, "sleep_state.json")
 TOKEN_FILE = os.path.join(PROFILE_DIR, "token.json")
-TEMPO_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo")
-CONFIG_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo_config")
+# Our own rate and config files, named in the sentinel so inputstream.tempo's
+# keymap acts on ours and not on another add-on's. A patched YouTube drives
+# the same add-on; on the shared paths an audiobook at 2.0x and a video at
+# 1.5x overwrote each other's rate.
+OWNER = "plugin.audio.koshelf"
+TEMPO_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo." + OWNER)
+CONFIG_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo_config." + OWNER)
+# The sentinel stays shared: it is the single "the keys are live" flag.
 ACTIVE_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo_active")
+
+
+def _sentinel_owner():
+    """The add-on named in the sentinel, or None if it is not in keyed form."""
+    try:
+        with open(ACTIVE_FILE) as f:
+            content = f.read()
+    except (IOError, OSError):
+        return None
+    for line in content.splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key.strip() == "addon":
+            return value.strip()
+    return None
+
+
+def _release_sentinel():
+    """Give the tempo speed keys back, if we were the ones holding them.
+
+    Kodi's player state is global, so this stop path also runs when something
+    else was playing — removing the sentinel unconditionally took the keys
+    away from whichever add-on had armed them.
+    """
+    if _sentinel_owner() != OWNER:
+        return
+    try:
+        os.remove(ACTIVE_FILE)
+    except OSError:
+        pass
 
 
 def _get_float(setting_id, default):
@@ -524,11 +559,7 @@ def run():
                 chapters = []
                 clear_session()
                 clear_koshelf_properties(win)
-                try:
-                    if os.path.exists(ACTIVE_FILE):
-                        os.remove(ACTIVE_FILE)
-                except OSError:
-                    pass
+                _release_sentinel()
             sleep_controller.on_playback_stopped(win)
             continue
 
