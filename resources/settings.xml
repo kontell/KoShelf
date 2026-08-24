@@ -126,32 +126,90 @@
       </group>
     </category>
     <category id="general" label="30100" help="30101">
-      <group id="1">
+      <group id="1" label="30120">
         <setting id="server_url" type="string" label="30110" help="30111">
           <level>0</level>
-          <default>http://localhost:13378</default>
-          <constraints>
-            <allowempty>true</allowempty>
-          </constraints>
-          <control type="edit" format="string"/>
-        </setting>
-        <setting id="username" type="string" label="30130" help="30131">
-          <level>0</level>
           <default></default>
           <constraints>
             <allowempty>true</allowempty>
           </constraints>
           <control type="edit" format="string"/>
         </setting>
-        <setting id="password" type="string" label="30140" help="30141">
+        <!-- format="action" buttons are the only way an add-on setting can
+             run code. close=true so the modal opens over the skin rather
+             than over this dialog. -->
+        <setting id="login_button" type="string" label="30170" help="30171">
           <level>0</level>
           <default></default>
-          <constraints>
-            <allowempty>true</allowempty>
-          </constraints>
-          <control type="edit" format="string">
-            <hidden>true</hidden>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible">
+              <condition setting="logged_in" operator="is">false</condition>
+            </dependency>
+          </dependencies>
+          <control type="button" format="action">
+            <data>RunPlugin(plugin://plugin.audio.koshelf/?action=login)</data>
+            <close>true</close>
           </control>
+        </setting>
+        <setting id="server_name" type="string" label="30172" help="30173">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <enable>false</enable>
+          <dependencies>
+            <dependency type="visible">
+              <condition setting="logged_in" operator="is">true</condition>
+            </dependency>
+          </dependencies>
+          <control type="edit" format="string"/>
+        </setting>
+        <setting id="user_name" type="string" label="30174" help="30175">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <enable>false</enable>
+          <dependencies>
+            <dependency type="visible">
+              <condition setting="logged_in" operator="is">true</condition>
+            </dependency>
+          </dependencies>
+          <control type="edit" format="string"/>
+        </setting>
+        <setting id="test_connection" type="string" label="30176" help="30177">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible">
+              <condition setting="logged_in" operator="is">true</condition>
+            </dependency>
+          </dependencies>
+          <control type="button" format="action">
+            <data>RunPlugin(plugin://plugin.audio.koshelf/?action=test_connection)</data>
+            <close>true</close>
+          </control>
+        </setting>
+        <setting id="logout_button" type="string" label="30178" help="30179">
+          <level>0</level>
+          <default></default>
+          <constraints><allowempty>true</allowempty></constraints>
+          <dependencies>
+            <dependency type="visible">
+              <condition setting="logged_in" operator="is">true</condition>
+            </dependency>
+          </dependencies>
+          <control type="button" format="action">
+            <data>RunPlugin(plugin://plugin.audio.koshelf/?action=logout)</data>
+            <close>true</close>
+          </control>
+        </setting>
+      </group>
+      <group id="2" label="30180">
+        <setting id="ssl_verify" type="boolean" label="30183" help="30184">
+          <level>1</level>
+          <default>true</default>
+          <control type="toggle"/>
         </setting>
         <setting id="sync_interval" type="integer" label="30070" help="30071">
           <level>0</level>
@@ -174,6 +232,47 @@
             <maximum>500</maximum>
           </constraints>
           <control type="slider" format="integer"/>
+        </setting>
+      </group>
+      <!-- Stored, never shown. A <dependency> can read a setting and cannot
+           read a file, which is why the account lives here and not in JSON. -->
+      <group id="3">
+        <setting id="logged_in" type="boolean">
+          <level>0</level><default>false</default><visible>false</visible>
+          <control type="toggle"/>
+        </setting>
+        <setting id="access_token" type="string">
+          <level>0</level><default></default><visible>false</visible>
+          <constraints><allowempty>true</allowempty></constraints>
+          <control type="edit" format="string"/>
+        </setting>
+        <setting id="refresh_token" type="string">
+          <level>0</level><default></default><visible>false</visible>
+          <constraints><allowempty>true</allowempty></constraints>
+          <control type="edit" format="string"/>
+        </setting>
+        <setting id="token_expires_at" type="string">
+          <level>0</level><default>0</default><visible>false</visible>
+          <constraints><allowempty>true</allowempty></constraints>
+          <control type="edit" format="string"/>
+        </setting>
+        <setting id="device_id" type="string">
+          <level>0</level><default></default><visible>false</visible>
+          <constraints><allowempty>true</allowempty></constraints>
+          <control type="edit" format="string"/>
+        </setting>
+        <!-- Kept defined, hidden and empty so the 0.24 migration can clear
+             the plaintext password a previous version stored here.
+             setSetting() on an id settings.xml does not declare is ignored. -->
+        <setting id="username" type="string">
+          <level>0</level><default></default><visible>false</visible>
+          <constraints><allowempty>true</allowempty></constraints>
+          <control type="edit" format="string"/>
+        </setting>
+        <setting id="password" type="string">
+          <level>0</level><default></default><visible>false</visible>
+          <constraints><allowempty>true</allowempty></constraints>
+          <control type="edit" format="string"><hidden>true</hidden></control>
         </setting>
       </group>
     </category>

@@ -2,31 +2,38 @@
 
 import xbmc
 
+from abs_auth import PLAYBACK_MIN_REMAINING_SECONDS
 from abs_http import Http, HttpError, Unauthorized, Unreachable
+
+CLIENT_NAME = "Koshelf"
 
 
 class ABSClient:
     """Client for the AudioBookShelf REST API."""
 
-    def __init__(
-        self, server_url, token=None, username=None, password=None, verify=True
-    ):
+    def __init__(self, server_url, token=None, verify=True, auth=None):
         self.server_url = server_url.rstrip("/")
         self.token = token
         # Set by every request, so a caller can tell an expired token from an
         # unreachable server without catching anything.
         self.last_error = None
+        # An abs_auth.Credentials, when there is one. Lets a 401 be answered
+        # with a token refresh instead of an error the user has to read.
+        self._auth = auth
+        self.device_id = getattr(auth, "device_id", "") or "kodi-koshelf"
         self.session = Http(verify=verify)
-        if not self.token and username and password:
-            self._login(username, password)
-        if self.token:
-            self.session.headers["Authorization"] = "Bearer " + self.token
+        self._set_token(token)
 
-    def _login(self, username, password):
-        """Authenticate with username/password and store the token."""
-        resp = self._post("/login", json={"username": username, "password": password})
-        if resp and "user" in resp:
-            self.token = resp["user"].get("token", "")
+    @classmethod
+    def from_credentials(cls, creds, verify=True):
+        return cls(creds.server_url, token=creds.bearer, verify=verify, auth=creds)
+
+    def _set_token(self, token):
+        self.token = token
+        if token:
+            self.session.headers["Authorization"] = "Bearer " + token
+        else:
+            self.session.headers.pop("Authorization", None)
 
     def _request(self, method, path, params=None, json_body=None, headers=None):
         """Return the decoded body, or None after logging why not.
@@ -42,11 +49,31 @@ class ABSClient:
                 method, url, params=params, json_body=json_body, headers=headers
             )
         except Unauthorized as error:
-            self.last_error = error
-            xbmc.log(
-                "ABSClient {} {} unauthorised".format(method, path), xbmc.LOGWARNING
-            )
-            return None
+            # One refresh, one retry. An access token lives an hour by
+            # default, so this is the ordinary path after an idle evening,
+            # not an exceptional one — and the alternative is asking the user
+            # to sign in again every morning.
+            if self._refresh_token_now():
+                try:
+                    response = self.session.request(
+                        method, url, params=params, json_body=json_body, headers=headers
+                    )
+                except (HttpError, Unreachable) as retry_error:
+                    self.last_error = retry_error
+                    xbmc.log(
+                        "ABSClient {} {} failed after refresh: {}".format(
+                            method, path, retry_error
+                        ),
+                        xbmc.LOGERROR,
+                    )
+                    return None
+            else:
+                self.last_error = error
+                xbmc.log(
+                    "ABSClient {} {} unauthorised".format(method, path),
+                    xbmc.LOGWARNING,
+                )
+                return None
         except (HttpError, Unreachable) as error:
             self.last_error = error
             xbmc.log(
@@ -58,6 +85,31 @@ class ABSClient:
         except ValueError:
             # A 204, or a success with an empty body: both mean "it worked".
             return {}
+
+    def _refresh_token_now(self):
+        """Refresh regardless of the clock: something already said 401."""
+        if self._auth is None:
+            return False
+        if not self._auth.refresh_now(self.session, min_remaining=0):
+            return False
+        self._set_token(self._auth.bearer)
+        xbmc.log("Koshelf: access token refreshed", xbmc.LOGINFO)
+        return True
+
+    def ensure_fresh_token(self, min_remaining=None):
+        """Refresh ahead of time if the token is close to expiring.
+
+        Called before starting playback: the stream URL carries the token and
+        a book outlasts an hour easily, so a token that is nearly up needs
+        replacing before the session starts rather than during it.
+        """
+        if self._auth is None:
+            return
+        kwargs = {} if min_remaining is None else {"min_remaining": min_remaining}
+        if self._auth.needs_refresh(**kwargs) and self._auth.refresh_now(
+            self.session, **kwargs
+        ):
+            self._set_token(self._auth.bearer)
 
     def _get(self, path, params=None):
         return self._request("GET", path, params=params)
@@ -160,13 +212,16 @@ class ABSClient:
 
     def start_playback(self, item_id, episode_id=None, use_hls=False):
         """Create a playback session. Direct play by default, HLS if use_hls=True."""
+        # The stream URL carries the token, and a book outlasts the one-hour
+        # access token easily. Start the session on a fresh one.
+        self.ensure_fresh_token(PLAYBACK_MIN_REMAINING_SECONDS)
         path = "/api/items/{}/play".format(item_id)
         if episode_id:
             path = "/api/items/{}/play/{}".format(item_id, episode_id)
         body = {
             "deviceInfo": {
-                "clientName": "Koshelf",
-                "deviceId": "kodi-koshelf",
+                "clientName": CLIENT_NAME,
+                "deviceId": self.device_id,
             },
         }
         if not use_hls:

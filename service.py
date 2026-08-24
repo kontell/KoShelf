@@ -9,6 +9,7 @@ import xbmcaddon
 import xbmcgui
 import xbmcvfs
 
+import abs_auth
 from abs_api import ABSClient
 
 ADDON = xbmcaddon.Addon()
@@ -17,7 +18,6 @@ SESSION_FILE = os.path.join(PROFILE_DIR, "session.json")
 SPEEDS_FILE = os.path.join(PROFILE_DIR, "speeds.json")
 SLEEP_FILE = os.path.join(PROFILE_DIR, "sleep_timer")
 SLEEP_STATE_FILE = os.path.join(PROFILE_DIR, "sleep_state.json")
-TOKEN_FILE = os.path.join(PROFILE_DIR, "token.json")
 # Our own rate and config files, named in the sentinel so inputstream.tempo's
 # keymap acts on ours and not on another add-on's. A patched YouTube drives
 # the same add-on; on the shared paths an audiobook at 2.0x and a video at
@@ -120,20 +120,18 @@ def save_book_speed(item_id, speed):
 
 
 def get_client():
-    server_url = ADDON.getSetting("server_url")
-    username = ADDON.getSetting("username")
-    password = ADDON.getSetting("password")
-    if not server_url or not (username and password):
+    """The API client for the signed-in user, or None.
+
+    Reads the same stored credentials main.py writes, and gets the same
+    refresh-on-401 behaviour: the service outlives any one access token by
+    hours, so this is the process that needs it most.
+    """
+    creds = abs_auth.Credentials(ADDON)
+    if not creds.has_credentials:
         return None
-    try:
-        if os.path.exists(TOKEN_FILE):
-            with open(TOKEN_FILE, "r") as f:
-                cached = json.load(f).get("token", "")
-                if cached:
-                    return ABSClient(server_url, token=cached)
-    except Exception:
-        pass
-    return ABSClient(server_url, username=username, password=password)
+    return ABSClient.from_credentials(
+        creds, verify=ADDON.getSetting("ssl_verify") != "false"
+    )
 
 
 def find_chapter(chapters, current_time):

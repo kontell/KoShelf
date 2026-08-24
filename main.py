@@ -7,7 +7,7 @@ import sys
 import json
 import time
 from html.parser import HTMLParser
-from urllib.parse import urlencode, parse_qs
+from urllib.parse import urlencode, parse_qs, urlsplit
 
 import xbmc
 import xbmcaddon
@@ -15,6 +15,8 @@ import xbmcgui
 import xbmcplugin
 import xbmcvfs
 
+import abs_auth
+import abs_http
 from abs_api import ABSClient
 
 # ── Plugin bootstrap ──
@@ -38,26 +40,52 @@ def _refresh_invocation():
     BASE_URL = sys.argv[0]
 
 
-TOKEN_FILE = os.path.join(
+# Where the pre-0.24 build kept its session token. Read once, to migrate.
+LEGACY_TOKEN_FILE = os.path.join(
     xbmcvfs.translatePath(ADDON.getAddonInfo("profile")), "token.json"
 )
 
 
-def _load_cached_token():
+def _migrate_legacy_credentials(creds):
+    """Adopt a pre-0.24 login instead of making the user sign in again.
+
+    Older builds stored the username and password as plain settings and cached
+    the deprecated non-expiring token in token.json. The token still works, so
+    it is adopted as-is with no expiry; the password is cleared, because
+    keeping a plaintext password around was the thing worth fixing.
+    """
+    if creds.logged_in:
+        return creds
+    token = ""
     try:
-        if os.path.exists(TOKEN_FILE):
-            with open(TOKEN_FILE, "r") as f:
-                return json.load(f).get("token", "")
+        if os.path.exists(LEGACY_TOKEN_FILE):
+            with open(LEGACY_TOKEN_FILE, "r") as f:
+                token = json.load(f).get("token", "")
     except Exception:
+        token = ""
+    if not token or not creds.server_url:
+        return creds
+    creds.access_token = token
+    creds.refresh_token = ""
+    # 0 = no expiry known. The legacy token does not expire, so nothing will
+    # try to refresh it — and there is no refresh token to try with.
+    creds.expires_at = 0
+    creds.user_name = ADDON.getSetting("username") or creds.user_name
+    if not creds.server_name:
+        creds.server_name = urlsplit(creds.server_url).netloc or creds.server_url
+    creds.logged_in = True
+    creds.save()
+    for stale in ("username", "password"):
+        try:
+            ADDON.setSetting(stale, "")
+        except Exception:
+            pass
+    try:
+        os.remove(LEGACY_TOKEN_FILE)
+    except OSError:
         pass
-    return ""
-
-
-def _save_cached_token(token):
-    profile_dir = os.path.dirname(TOKEN_FILE)
-    os.makedirs(profile_dir, exist_ok=True)
-    with open(TOKEN_FILE, "w") as f:
-        json.dump({"token": token}, f)
+    xbmc.log("Koshelf: migrated pre-0.24 credentials; password cleared", xbmc.LOGINFO)
+    return creds
 
 
 # ssl.create_default_context() loads the system CA bundle, which is not free,
@@ -66,41 +94,33 @@ def _save_cached_token(token):
 _client_cache = {"key": None, "client": None}
 
 
-def get_client():
-    server_url = ADDON.getSetting("server_url")
-    username = ADDON.getSetting("username")
-    password = ADDON.getSetting("password")
-    if not server_url:
-        xbmcgui.Dialog().ok(
-            "Koshelf", "Please configure the server URL in addon settings."
-        )
-        ADDON.openSettings()
+def _verify_ssl():
+    return ADDON.getSetting("ssl_verify") != "false"
+
+
+def get_client(prompt=True):
+    """The API client for the signed-in user, or None if there is not one.
+
+    No round trip to check the token: that used to be a get_libraries() call
+    on every listing whose result was thrown away. An expired token announces
+    itself on the next real request, and ABSClient answers it with a refresh.
+    """
+    creds = _migrate_legacy_credentials(abs_auth.Credentials(ADDON))
+    if not creds.has_credentials:
+        if prompt:
+            xbmcgui.Dialog().ok(
+                "Koshelf",
+                "Sign in to your AudioBookShelf server to get started.",
+            )
+            ADDON.openSettings()
         return None
-    if not (username and password):
-        xbmcgui.Dialog().ok(
-            "Koshelf", "Please configure username and password in addon settings."
-        )
-        ADDON.openSettings()
-        return None
-    # Use the cached token without checking it first. The check used to be a
-    # get_libraries() call whose result was thrown away — a full round trip on
-    # every listing, and the root menu then fetched the same endpoint again a
-    # moment later. A token that has expired announces itself on the next real
-    # request; that is where it is handled.
-    cached = _load_cached_token()
-    if cached:
-        key = (server_url, cached)
-        if _client_cache["key"] == key and _client_cache["client"] is not None:
-            return _client_cache["client"]
-        client = ABSClient(server_url, token=cached)
-        _client_cache["key"] = key
-        _client_cache["client"] = client
-        return client
-    client = ABSClient(server_url, username=username, password=password)
-    if client.token:
-        _save_cached_token(client.token)
-        _client_cache["key"] = (server_url, client.token)
-        _client_cache["client"] = client
+
+    key = (creds.server_url, creds.bearer)
+    if _client_cache["key"] == key and _client_cache["client"] is not None:
+        return _client_cache["client"]
+    client = ABSClient.from_credentials(creds, verify=_verify_ssl())
+    _client_cache["key"] = key
+    _client_cache["client"] = client
     return client
 
 
@@ -137,6 +157,22 @@ def build_url(**kwargs):
     return "{}?{}".format(BASE_URL, urlencode(kwargs))
 
 
+ICON_DIR = os.path.join(
+    xbmcvfs.translatePath(ADDON.getAddonInfo("path")), "resources", "icons"
+)
+# Material Symbols (Apache-2.0), for what Kodi has no icon for. Regenerate
+# with tools/make-icons.py.
+ICON_BOOKS = os.path.join(ICON_DIR, "books.png")
+ICON_CONTINUE = os.path.join(ICON_DIR, "continue.png")
+ICON_SORT = os.path.join(ICON_DIR, "sort.png")
+ICON_NEXT = os.path.join(ICON_DIR, "navigate_next.png")
+ICON_LOGIN = os.path.join(ICON_DIR, "login.png")
+
+# Shown for an item whose cover the server does not have.
+FALLBACK_COVER = os.path.join(
+    xbmcvfs.translatePath(ADDON.getAddonInfo("path")), "resources", "ABS-Default.png"
+)
+
 # Kodi resolves a bare "DefaultX.png" out of whichever skin is running, so
 # these match the user's theme instead of fighting it and nothing needs to be
 # shipped. All of them were checked against a live skin before being used
@@ -146,9 +182,12 @@ def build_url(**kwargs):
 #
 # Only routes with no Kodi equivalent fall back to a bundled Material Symbol.
 _ACTION_ICONS = {
-    "continue_listening": "DefaultMusicRecentlyPlayed.png",
-    "library": "DefaultMusicAlbums.png",
-    "library_items": "DefaultMusicAlbums.png",
+    "continue_listening": ICON_CONTINUE,
+    # Books get the Material "auto_stories" open book: Kodi's nearest names
+    # are all music ones (DefaultMusicAlbums.png is a disc), and a book
+    # library is the one thing in this add-on that deserves a real book.
+    "library": ICON_BOOKS,
+    "library_items": ICON_BOOKS,
     "podcast_items": "DefaultAddonLyrics.png",
     "series_list": "DefaultSets.png",
     "series_detail": "DefaultSets.png",
@@ -163,19 +202,6 @@ _ACTION_ICONS = {
     "speed_dialog": "DefaultMusicSongs.png",
     "set_sleep_timer": "DefaultAddonScreensaver.png",
 }
-
-ICON_DIR = os.path.join(
-    xbmcvfs.translatePath(ADDON.getAddonInfo("path")), "resources", "icons"
-)
-# Material Symbols (Apache-2.0), for the three things Kodi has no icon for.
-ICON_SORT = os.path.join(ICON_DIR, "sort.png")
-ICON_NEXT = os.path.join(ICON_DIR, "navigate_next.png")
-ICON_LOGIN = os.path.join(ICON_DIR, "login.png")
-
-# Shown for an item whose cover the server does not have.
-FALLBACK_COVER = os.path.join(
-    xbmcvfs.translatePath(ADDON.getAddonInfo("path")), "resources", "ABS-Default.png"
-)
 
 
 def _cover_art(client, item, item_id=None):
@@ -672,6 +698,132 @@ def route_settings():
 
     # After settings close, refresh the config file for inputstream.tempo.
     _write_config_file()
+
+
+# ── Account ──
+
+
+def _notify(message, seconds=4):
+    xbmcgui.Dialog().notification("Koshelf", message, time=seconds * 1000)
+
+
+def route_login():
+    """Sign in. Reached from the Settings button, so there is no handle.
+
+    The password is asked for here and never stored: it is exchanged for an
+    access token and a refresh token, and those are what get saved.
+    """
+    creds = abs_auth.Credentials(ADDON)
+    if creds.logged_in:
+        _notify("Already signed in as {}".format(creds.user_name or "this user"))
+        return
+
+    raw = creds.server_url or xbmcgui.Dialog().input("AudioBookShelf server address")
+    if not raw:
+        return
+    address = abs_auth.normalize_address(raw)
+    http = abs_auth.transport(verify=_verify_ssl())
+
+    # Ask the server who it is before asking the user for a password: a typo
+    # in the address should read as "cannot reach that server", not as a
+    # rejected login.
+    try:
+        status = abs_auth.server_status(http, address)
+    except (abs_http.HttpError, abs_http.Unreachable) as error:
+        xbmc.log(
+            "Koshelf: server probe failed for {}: {}".format(address, error),
+            xbmc.LOGWARNING,
+        )
+        xbmcgui.Dialog().ok(
+            "Koshelf",
+            "Could not reach a server at\n{}\n\nCheck the address and that "
+            "the server is running.".format(address),
+        )
+        return
+    if status.get("app") != "audiobookshelf":
+        xbmcgui.Dialog().ok(
+            "Koshelf",
+            "Something answered at\n{}\nbut it is not an AudioBookShelf "
+            "server.".format(address),
+        )
+        return
+    server_name = "AudioBookShelf {}".format(status.get("serverVersion", ""))
+
+    username = xbmcgui.Dialog().input("Username")
+    if not username:
+        return
+    password = xbmcgui.Dialog().input("Password", option=xbmcgui.ALPHANUM_HIDE_INPUT)
+    try:
+        result = abs_auth.login(http, address, username, password)
+    except abs_http.Unauthorized:
+        xbmcgui.Dialog().ok("Koshelf", "That username or password was not accepted.")
+        return
+    except (abs_http.HttpError, abs_http.Unreachable) as error:
+        xbmc.log("Koshelf: sign-in failed: {}".format(error), xbmc.LOGERROR)
+        xbmcgui.Dialog().ok("Koshelf", "Sign-in failed: {}".format(error))
+        return
+    finally:
+        http.close()
+
+    if not result.access_token:
+        xbmcgui.Dialog().ok("Koshelf", "The server did not return a token.")
+        return
+
+    creds.apply(result, address=address, server_name=server_name)
+    creds.user_name = result.user_name or username
+    creds.save()
+    invalidate_progress_cache()
+    _client_cache["key"] = None
+    _notify("Signed in as {}".format(creds.user_name))
+    xbmc.log(
+        "Koshelf: signed in to {} as {}".format(address, creds.user_name), xbmc.LOGINFO
+    )
+
+
+def route_logout():
+    creds = abs_auth.Credentials(ADDON)
+    if not creds.logged_in:
+        _notify("Not signed in")
+        return
+    if not xbmcgui.Dialog().yesno(
+        "Koshelf", "Sign out of {}?".format(creds.server_name or creds.server_url)
+    ):
+        return
+    http = abs_auth.transport(verify=_verify_ssl())
+    abs_auth.logout(http, creds.server_url, creds.access_token)
+    http.close()
+    creds.clear()
+    invalidate_progress_cache()
+    _client_cache["key"] = None
+    _notify("Signed out")
+
+
+def route_test_connection():
+    creds = abs_auth.Credentials(ADDON)
+    if not creds.has_credentials:
+        xbmcgui.Dialog().ok("Koshelf", "Sign in first.")
+        return
+    client = ABSClient.from_credentials(creds, verify=_verify_ssl())
+    libraries = client.get_libraries()
+    if libraries:
+        xbmcgui.Dialog().ok(
+            "Koshelf",
+            "Connected to {}\n\n{} librar{}: {}".format(
+                creds.server_name or creds.server_url,
+                len(libraries),
+                "y" if len(libraries) == 1 else "ies",
+                ", ".join(lib.get("name", "?") for lib in libraries),
+            ),
+        )
+        return
+    error = client.last_error
+    if isinstance(error, abs_http.Unauthorized):
+        message = "The server rejected the saved credentials. Sign in again."
+    elif error is not None:
+        message = "Could not reach the server:\n{}".format(error)
+    else:
+        message = "Connected, but the account can see no libraries."
+    xbmcgui.Dialog().ok("Koshelf", message)
 
 
 def route_continue_listening(client):
@@ -1441,12 +1593,21 @@ def router():
     for k, v in params.items():
         args[k] = v[0] if len(v) == 1 else v
 
+    action = args.get("action", "")
+
+    # Account routes run before there is a client, and are reached with
+    # RunPlugin from the settings buttons, so there is no handle either.
+    if action == "login":
+        return route_login()
+    if action == "logout":
+        return route_logout()
+    if action == "test_connection":
+        return route_test_connection()
+
     client = get_client()
     if not client:
         xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
         return
-
-    action = args.get("action", "")
 
     if not action:
         route_root(client)

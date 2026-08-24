@@ -1,3 +1,24 @@
+v0.24.0
+- Your password is no longer stored. Sign-in is a button in Settings that
+  asks for the password once, exchanges it for tokens, and forgets it. An
+  existing install is migrated automatically on first run — you stay signed
+  in, and the stored plaintext password is cleared.
+- Uses AudioBookShelf's current token model: a one-hour access token plus a
+  refresh token, refreshed automatically when it expires and again before
+  playback starts. The old login read user.token, which the server source
+  marks "Old non-expiring token" — it still works and is still accepted from
+  older servers, but nothing new is issued on it.
+- Settings now shows which server and account you are signed in to, with
+  Test connection and Sign out buttons.
+- The server address accepts a bare host name (http, port 13378), host:port,
+  or a full URL.
+- Signing in checks the address before asking for a password, so a typo
+  reads as "could not reach that server" rather than a failed login.
+- New: Verify HTTPS certificate, for a server behind a self-signed one.
+- Each install now identifies itself to the server with its own device ID
+  instead of a constant shared by every copy of the add-on.
+- Books and Continue Listening have their own icons.
+
 v0.23.0
 - The sort menu now works. Picking "Recently added" returned the right page
   from the server and then Kodi re-sorted it alphabetically, because the
