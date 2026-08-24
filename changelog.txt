@@ -1,3 +1,75 @@
+Kotome 1.0.0 is the first release under this name. It was previously called
+Koshelf (plugin.audio.koshelf), which is no longer maintained. Kotome
+installs as a separate add-on and carries nothing over, so sign in once and
+set your preferences; uninstall Koshelf whenever you like. Entries below
+1.0.0 are Koshelf's history, kept for the record.
+
+v1.0.0
+Sleep timer
+- The screen overlay is gone. It could deadlock Kodi: the full-screen
+  window it drew outlived the service, survived the add-on being disabled,
+  and once ownerless the next Back press froze the whole UI unrecoverably.
+  The timer now uses Kodi's own screensaver and puts your screensaver
+  settings back when you return.
+- Removed Screen off (HDMI-CEC): it needs peripheral.libcec, which does not
+  exist on Android and is not on a stock desktop Kodi.
+- "Screen off (Android / Google TV)" is now "Turn the display off
+  (Linux/X11 only)", which is where DPMS actually exists. On Android the
+  screensaver is used instead.
+- New "Screensaver: my usual one" mode.
+- Fix: the idle-seconds setting used an operator Kodi does not have, so the
+  whole dependency was discarded and the setting showed even with the
+  screen action set to None.
+
+Speed
+- Browsing is roughly ten times faster. Every listing used to spend
+  0.8-1.6 s starting up before doing any work, most of it importing a
+  library that a short-lived plugin process cannot benefit from. Root menu
+  0.91 s -> 0.08 s, Authors 1.08 s -> 0.09 s on a desktop; an ARM box saves
+  considerably more.
+- The cached token is no longer checked with a throwaway API call on every
+  listing, and your progress data is fetched once rather than per folder.
+
+Browsing
+- The sort menu now works. Picking "Recently added" returned the right page
+  from the server and then Kodi re-sorted it alphabetically.
+- The sort picker moved to the context menu, so it is on every item and
+  every page rather than only at the top of page one. More sorts: author
+  Z-A, narrator, series, oldest added, published year ascending, size.
+- In-progress books and episodes carry a real Kodi resume point instead of
+  "[42%]" in the title, so skins show their own progress indicator and Kodi
+  offers Resume / Start from beginning. Finished books are marked watched.
+- Narrator, duration, genre and year moved out of the label into the info
+  tag, where the skin can lay them out.
+- Every folder has an icon. Books and Continue Listening have their own;
+  the rest use Kodi's, so they match whatever skin you run.
+- Books and podcasts with no cover on the server show a placeholder instead
+  of a broken image.
+- Added fan art. Note that some skins have fanart backgrounds turned off —
+  in Contuary it is Settings, "No fanart".
+- Removed the Music player (PAPlayer) option. It was not supported.
+- Fix: a book whose published year is a full date crashed the listing.
+
+Account
+- Your password is no longer stored. Sign in is a button in Settings that
+  asks once, exchanges it for tokens, and forgets it.
+- Uses AudioBookShelf's current token model — a one-hour access token plus
+  a refresh token, renewed automatically and again before playback starts.
+  The previous login used a token the server marks deprecated.
+- Settings shows which server and account you are signed in to, with Test
+  connection and Sign out.
+- The server address accepts a bare host name, host:port, or a full URL,
+  and is checked before you are asked for a password.
+- New: Verify HTTPS certificate, for a server behind a self-signed one.
+- Each install identifies itself to the server with its own device ID.
+
+Fixes
+- Opening Settings from the add-on menu, or hitting an unrecognised route,
+  left a directory handle open; a favourite or library node pointing at
+  either could hang.
+- A trailing slash on a plugin URL broke any route whose last parameter was
+  not the action.
+
 v0.20.0
 - Sleep timer screen options restructured: single "Screen action" setting
   with five modes — Screensaver: Black, Screensaver: Dim, Screen off
