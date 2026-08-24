@@ -174,11 +174,11 @@ msgid "Screen action"
 msgstr ""
 
 msgctxt "#30211"
-msgid "What to do with the screen while the sleep timer is active. Screensaver options swap Kodi's screensaver after an idle period. Screen-off options power down the display directly."
+msgid "What to do with the screen once you stop touching the remote. The screensaver options use Kodi's own screensaver, and put your screensaver settings back when the timer ends. Turning the display off needs DPMS, which only exists on Linux/X11 — elsewhere the screensaver is used instead."
 msgstr ""
 
 msgctxt "#30212"
-msgid "None"
+msgid "Nothing"
 msgstr ""
 
 msgctxt "#30213"
@@ -189,12 +189,12 @@ msgctxt "#30214"
 msgid "Screensaver: Dim"
 msgstr ""
 
-msgctxt "#30215"
-msgid "Screen off (HDMI-CEC)"
+msgctxt "#30216"
+msgid "Turn the display off (Linux/X11 only)"
 msgstr ""
 
-msgctxt "#30216"
-msgid "Screen off (Android / Google TV)"
+msgctxt "#30217"
+msgid "Screensaver: my usual one"
 msgstr ""
 
 # Idle seconds
@@ -203,7 +203,7 @@ msgid "Idle seconds before screen action"
 msgstr ""
 
 msgctxt "#30221"
-msgid "How many seconds without input before the screen action fires."
+msgid "How many seconds without input before the screen action fires. It fires once per idle period and re-arms when you next touch the remote."
 msgstr ""
 
 # Volume ramp-down

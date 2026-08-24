@@ -12,7 +12,6 @@ import xbmcvfs
 from abs_api import ABSClient
 
 ADDON = xbmcaddon.Addon()
-ADDON_PATH = xbmcvfs.translatePath(ADDON.getAddonInfo("path"))
 PROFILE_DIR = xbmcvfs.translatePath(ADDON.getAddonInfo("profile"))
 SESSION_FILE = os.path.join(PROFILE_DIR, "session.json")
 SPEEDS_FILE = os.path.join(PROFILE_DIR, "speeds.json")
@@ -186,28 +185,52 @@ def _jsonrpc(method, params=None):
         return {}
 
 
-class _ScreenOverlay(xbmcgui.WindowDialog):
-    """Full-screen black or dim overlay. Bypasses Kodi's screensaver system
-    entirely — works even during VideoPlayer playback (which inhibits the
-    normal screensaver)."""
+# Consecutive polls of an inactive screensaver that mean the user is really
+# back, rather than the momentary drop every Player.Stop causes. At the loop's
+# 0.25 s tick this is a fifth of a second of confirmation.
+WAKE_CONFIRM_POLLS = 3
 
-    _BLACK_IMG = os.path.join(ADDON_PATH, "resources", "black.png")
+# Kodi settings the screensaver action has to borrow, and put back.
+SETTING_SAVER_MODE = "screensaver.mode"
+SETTING_SAVER_AUDIO = "screensaver.disableforaudio"
 
-    def __init__(self, dim=False):
-        super().__init__()
-        color = "CC000000" if dim else "FF000000"
-        try:
-            w = int(xbmcgui.getScreenWidth())
-            h = int(xbmcgui.getScreenHeight())
-        except (AttributeError, TypeError):
-            w, h = 1920, 1080
-        img = xbmcgui.ControlImage(0, 0, w, h, self._BLACK_IMG, colorDiffuse=color)
-        self.addControl(img)
+# Screensaver add-ons Kodi always ships, used when an action names a look.
+SAVER_BLACK = "screensaver.xbmc.builtin.black"
+SAVER_DIM = "screensaver.xbmc.builtin.dim"
+
+_SAVER_FOR_ACTION = {
+    "screensaver_black": SAVER_BLACK,
+    "screensaver_dim": SAVER_DIM,
+    "screensaver_user": None,  # whatever the user already configured
+}
+
+# Values written by versions that drove the screen directly. Both mechanisms
+# they named are no-ops on Android and neither survived testing on Linux, so
+# they are folded into the screensaver path rather than left to fail quietly.
+_LEGACY_ACTIONS = {
+    "screen_off_cec": "screensaver_black",
+    "screen_off_android": "screen_off",
+}
+
+
+def _normalise_screen_action(value):
+    """Current name for a possibly-legacy sleep_screen_action value."""
+    return _LEGACY_ACTIONS.get(value, value or "screensaver_black")
+
+
+def _get_setting(setting_id):
+    """Read a Kodi (not add-on) setting, or None if it could not be read."""
+    result = _jsonrpc("Settings.GetSettingValue", {"setting": setting_id})
+    return result.get("value") if "value" in result else None
+
+
+def _set_setting(setting_id, value):
+    _jsonrpc("Settings.SetSettingValue", {"setting": setting_id, "value": value})
 
 
 class SleepModeController:
-    """Owns sleep-timer side effects: screen overlay, volume ramp-down,
-    and crash recovery.
+    """Owns sleep-timer side effects: screen action, volume ramp-down, and
+    crash recovery.
 
     The controller is driven by the existence of SLEEP_FILE — main.py writes
     it (epoch seconds = end_time) to start a timer. The service polls it and
@@ -216,10 +239,23 @@ class SleepModeController:
 
     Screen action modes (sleep_screen_action setting):
       none              — don't touch the screen
-      screensaver_black — full-screen black overlay after idle
-      screensaver_dim   — semi-transparent black overlay after idle
-      screen_off_cec    — send CEC standby after idle
-      screen_off_android — toggle DPMS after idle (Linux/Android)
+      screensaver_black — Kodi's screensaver, forced to Black, after idle
+      screensaver_dim   — Kodi's screensaver, forced to Dim, after idle
+      screensaver_user  — Kodi's screensaver, the user's own choice
+      screen_off        — power the display down via DPMS (Linux/X11 only)
+
+    Earlier versions drew a full-screen xbmcgui.WindowDialog instead of using
+    Kodi's screensaver. That is gone. A Python window outlives the script that
+    created it, survives the add-on being disabled, and once ownerless the next
+    Back press deadlocks Kodi's application thread inside
+    CScriptInvocationManager::Process() — an unrecoverable whole-UI freeze that
+    lands on the user while they are asleep. Verified on 21.3 with a gdb
+    backtrace; only SIGKILL ended it.
+
+    Two Kodi settings have to be borrowed for the screensaver path and put back
+    afterwards: screensaver.mode, because an empty mode ("None") draws nothing,
+    and screensaver.disableforaudio, which defaults to true and otherwise makes
+    ActivateScreenSaver a silent no-op during audio playback.
     """
 
     def __init__(self):
@@ -229,19 +265,32 @@ class SleepModeController:
         self.user_overrode_volume = False
         self._screen_action_fired = False
         self._screen_action = "none"
-        self._overlay = None
+        self._saved_saver_mode = None
+        self._saved_saver_audio = None
+        self._awaiting_wake = False
+        self._redarken_pending = False
+        self._wake_polls = 0
         if os.path.exists(SLEEP_STATE_FILE) and not os.path.exists(SLEEP_FILE):
             self._restore_from_state_file()
 
     def _restore_from_state_file(self):
+        """Put back what a Kodi killed mid-timer left changed.
+
+        Without this the user is left with their screensaver disabled, audio
+        screensavers silently re-enabled, and the volume wherever the ramp had
+        got to — permanently, with nothing to explain it.
+        """
         try:
             with open(SLEEP_STATE_FILE) as f:
                 state = json.load(f)
             vol = state.get("volume")
             if vol is not None:
                 _jsonrpc("Application.SetVolume", {"volume": int(vol)})
-            action = state.get("screen_action", "")
-            if action == "screen_off_android":
+            if state.get("saver_mode") is not None:
+                _set_setting(SETTING_SAVER_MODE, state["saver_mode"])
+            if state.get("saver_audio") is not None:
+                _set_setting(SETTING_SAVER_AUDIO, bool(state["saver_audio"]))
+            if state.get("screen_action") == "screen_off":
                 if xbmc.getCondVisibility("System.DPMSActive"):
                     xbmc.executebuiltin("ToggleDPMS")
             os.remove(SLEEP_STATE_FILE)
@@ -309,17 +358,45 @@ class SleepModeController:
         self.active = True
         self.user_overrode_volume = False
         self._screen_action_fired = False
-        self._screen_action = (
-            ADDON.getSetting("sleep_screen_action") or "screensaver_black"
+        self._screen_action = _normalise_screen_action(
+            ADDON.getSetting("sleep_screen_action")
         )
+        if self._screen_action == "screen_off" and xbmc.getCondVisibility(
+            "System.Platform.Android"
+        ):
+            # Kodi has no DPMS implementation on Android: the builtin returns
+            # without acting and without logging. Fall back to the screensaver
+            # rather than promise a dark screen we cannot deliver.
+            xbmc.log(
+                "Koshelf: screen_off is Linux/X11 only — using the screensaver "
+                "on this platform",
+                xbmc.LOGINFO,
+            )
+            self._screen_action = "screensaver_black"
+
         vol = _jsonrpc("Application.GetProperties", {"properties": ["volume"]}).get(
             "volume"
         )
         self.original_volume = vol
         self.last_applied_volume = vol
+
+        self._saved_saver_mode = None
+        self._saved_saver_audio = None
+        if self._screen_action in _SAVER_FOR_ACTION:
+            self._saved_saver_mode = _get_setting(SETTING_SAVER_MODE)
+            self._saved_saver_audio = _get_setting(SETTING_SAVER_AUDIO)
+
         try:
             with open(SLEEP_STATE_FILE, "w") as f:
-                json.dump({"volume": vol, "screen_action": self._screen_action}, f)
+                json.dump(
+                    {
+                        "volume": vol,
+                        "screen_action": self._screen_action,
+                        "saver_mode": self._saved_saver_mode,
+                        "saver_audio": self._saved_saver_audio,
+                    },
+                    f,
+                )
         except IOError:
             pass
         xbmc.log(
@@ -329,14 +406,14 @@ class SleepModeController:
         )
 
     def _exit(self):
-        """Restore screen and volume — called on cancel or manual stop."""
-        self._close_overlay()
+        """Restore screen and volume — called on cancel or manual stop.
+
+        The user is present, so this wakes the screen as well as putting the
+        settings back.
+        """
         if self._screen_action_fired:
-            if self._screen_action == "screen_off_cec":
-                xbmc.executebuiltin("CECActivateSource")
-            elif self._screen_action == "screen_off_android":
-                if xbmc.getCondVisibility("System.DPMSActive"):
-                    xbmc.executebuiltin("ToggleDPMS")
+            self._wake_screen()
+        self._restore_saver_settings()
         if self.original_volume is not None and not self.user_overrode_volume:
             _jsonrpc("Application.SetVolume", {"volume": int(self.original_volume)})
         try:
@@ -345,11 +422,7 @@ class SleepModeController:
         except OSError:
             pass
         xbmc.log("Koshelf: sleep mode exited", xbmc.LOGINFO)
-        self.active = False
-        self.original_volume = None
-        self.last_applied_volume = None
-        self.user_overrode_volume = False
-        self._screen_action_fired = False
+        self._reset()
 
     def _expire(self, player):
         """Timer fired — stop playback, restore volume, leave screen dark."""
@@ -364,35 +437,128 @@ class SleepModeController:
             pass
         if self.original_volume is not None and not self.user_overrode_volume:
             _jsonrpc("Application.SetVolume", {"volume": int(self.original_volume)})
-        # Leave overlay/screen-off in place — user is asleep. The overlay
-        # will be garbage-collected when the service restarts, and CEC/DPMS
-        # stays off until user input.
+
+        if self._screen_action_fired and self._screen_action in _SAVER_FOR_ACTION:
+            # Leave the screen dark. The user is asleep; restoring
+            # screensaver.mode now would deactivate the screensaver and light
+            # the room back up, which is the opposite of what they asked for.
+            # The borrowed settings are put back when they come back —
+            # see await_wake() — and sleep_state.json stays on disk until then
+            # so a Kodi killed overnight still recovers them on next start.
+            self._awaiting_wake = True
+            self._redarken_pending = True
+            self._wake_polls = 0
+            xbmc.log(
+                "Koshelf: screen left dark; settings restore deferred to wake",
+                xbmc.LOGINFO,
+            )
+        else:
+            self._restore_saver_settings()
+            self._clear_state_file()
+        self._reset(keep_awaiting=True)
+
+    def _clear_state_file(self):
         try:
             if os.path.exists(SLEEP_STATE_FILE):
                 os.remove(SLEEP_STATE_FILE)
         except OSError:
             pass
+
+    def await_wake(self, playing_again=False):
+        """Hold the screen dark after expiry, then hand the settings back.
+
+        Stopping playback deactivates Kodi's screensaver — measured on 21.3:
+        System.ScreenSaverActive goes true on activation and false the moment
+        Player.Stop lands. So the stop that ends the timer also lights the
+        room back up unless the screensaver is put straight back. That is done
+        exactly once, on the first poll after expiry.
+
+        After that, the screensaver going *and staying* inactive means the
+        user is back, and the borrowed settings are returned. Two things this
+        deliberately does not do:
+
+        - it does not re-arm the screensaver repeatedly. A poll that
+          reactivates on every tick fights the user for control of their own
+          screen, and they cannot win it from a remote.
+        - it does not key off getGlobalIdleTime(). Input delivered over
+          JSON-RPC does not move that clock, so anything driven by it cannot
+          be tested, and an untestable wake condition on a feature that runs
+          overnight is not worth having.
+
+        GUI.OnScreensaverDeactivated is not used either: it is never announced
+        when screensaver.mode is empty, which is the state most installs are
+        in and precisely the state being restored.
+        """
+        if not self._awaiting_wake:
+            return
+
+        saver_up = xbmc.getCondVisibility("System.ScreenSaverActive")
+
+        if self._redarken_pending and not playing_again:
+            # First poll after the stop: put the screen back the way the timer
+            # promised, then leave it alone.
+            self._redarken_pending = False
+            if not saver_up:
+                xbmc.executebuiltin("ActivateScreenSaver")
+            self._wake_polls = 0
+            return
+
+        if not playing_again:
+            if saver_up:
+                self._wake_polls = 0
+                return
+            # Debounced: one inactive reading can be the tail of the stop.
+            self._wake_polls += 1
+            if self._wake_polls < WAKE_CONFIRM_POLLS:
+                return
+
+        self._restore_saver_settings()
+        self._clear_state_file()
+        self._awaiting_wake = False
+        self._redarken_pending = False
+        self._wake_polls = 0
+        self._saved_saver_mode = None
+        self._saved_saver_audio = None
+        xbmc.log("Koshelf: user returned — screensaver settings restored", xbmc.LOGINFO)
+
+    def _reset(self, keep_awaiting=False):
         self.active = False
         self.original_volume = None
         self.last_applied_volume = None
         self.user_overrode_volume = False
         self._screen_action_fired = False
+        if not (keep_awaiting and self._awaiting_wake):
+            self._saved_saver_mode = None
+            self._saved_saver_audio = None
 
-    def _close_overlay(self):
-        if self._overlay is not None:
-            try:
-                self._overlay.close()
-            except Exception:
-                pass
-            self._overlay = None
+    def _restore_saver_settings(self):
+        """Give Kodi's screensaver settings back exactly as we found them."""
+        if self._saved_saver_mode is not None:
+            _set_setting(SETTING_SAVER_MODE, self._saved_saver_mode)
+        if self._saved_saver_audio is not None:
+            _set_setting(SETTING_SAVER_AUDIO, bool(self._saved_saver_audio))
+
+    def _wake_screen(self):
+        if self._screen_action == "screen_off":
+            if xbmc.getCondVisibility("System.DPMSActive"):
+                xbmc.executebuiltin("ToggleDPMS")
+        elif xbmc.getCondVisibility("System.ScreenSaverActive"):
+            # 'noop' deactivates the screensaver and does nothing else. Any
+            # real input wakes it too, but Select lands on whatever has focus
+            # and can answer a dialog nobody knew was open.
+            _jsonrpc("Input.ExecuteAction", {"action": "noop"})
+
+    @staticmethod
+    def _idle_threshold():
+        try:
+            return int(ADDON.getSetting("sleep_idle_seconds"))
+        except (ValueError, TypeError):
+            return 30
 
     def _maybe_fire_screen_action(self):
         if self._screen_action == "none":
             return
-        try:
-            idle_thresh = int(ADDON.getSetting("sleep_idle_seconds"))
-        except (ValueError, TypeError):
-            idle_thresh = 30
+        idle_thresh = self._idle_threshold()
         try:
             idle = xbmc.getGlobalIdleTime()
         except Exception:
@@ -400,30 +566,48 @@ class SleepModeController:
 
         if idle < idle_thresh:
             if self._screen_action_fired:
-                # User interacted — dismiss overlay, allow re-fire
-                self._close_overlay()
+                # The user came back. Re-arm so the action fires again on the
+                # next idle period; the screensaver has already dismissed
+                # itself on their input.
                 self._screen_action_fired = False
             return
 
         if self._screen_action_fired:
             return
 
-        if self._screen_action == "screensaver_black":
-            self._overlay = _ScreenOverlay(dim=False)
-            self._overlay.show()
-            self._screen_action_fired = True
-        elif self._screen_action == "screensaver_dim":
-            self._overlay = _ScreenOverlay(dim=True)
-            self._overlay.show()
-            self._screen_action_fired = True
-        elif self._screen_action == "screen_off_cec":
-            xbmc.executebuiltin("CECStandby")
-            self._screen_action_fired = True
-            xbmc.log("Koshelf: sent CEC standby (idle={})".format(idle), xbmc.LOGINFO)
-        elif self._screen_action == "screen_off_android":
+        if self._screen_action == "screen_off":
             xbmc.executebuiltin("ToggleDPMS")
             self._screen_action_fired = True
-            xbmc.log("Koshelf: toggled DPMS off (idle={})".format(idle), xbmc.LOGINFO)
+            xbmc.log(
+                "Koshelf: display off via DPMS (idle={})".format(idle), xbmc.LOGINFO
+            )
+        elif self._screen_action in _SAVER_FOR_ACTION:
+            self._activate_screensaver()
+            self._screen_action_fired = True
+            xbmc.log(
+                "Koshelf: screensaver activated (idle={}, mode={})".format(
+                    idle, self._screen_action
+                ),
+                xbmc.LOGINFO,
+            )
+
+    def _activate_screensaver(self):
+        """Fire Kodi's own screensaver, borrowing two settings to do it.
+
+        screensaver.disableforaudio defaults to true, and with it set
+        ActivateScreenSaver is a silent no-op during audio playback — measured
+        on 21.3: System.ScreenSaverActive stayed false with it on and went true
+        with it off, same call either way. An empty screensaver.mode ("None",
+        which real installs use) draws nothing, so a named look is substituted
+        for the duration of the timer.
+        """
+        wanted = _SAVER_FOR_ACTION.get(self._screen_action)
+        if wanted is None:
+            # 'the user's own choice' — but None is not a choice we can show.
+            wanted = self._saved_saver_mode or SAVER_BLACK
+        _set_setting(SETTING_SAVER_MODE, wanted)
+        _set_setting(SETTING_SAVER_AUDIO, False)
+        xbmc.executebuiltin("ActivateScreenSaver")
 
     def _maybe_ramp_volume(self, remaining):
         try:
@@ -561,9 +745,11 @@ def run():
                 clear_koshelf_properties(win)
                 _release_sentinel()
             sleep_controller.on_playback_stopped(win)
+            sleep_controller.await_wake()
             continue
 
         # Audio is playing — check if we have a session to track
+        sleep_controller.await_wake(playing_again=True)
         session_data = load_session()
         if not session_data:
             continue
@@ -634,6 +820,7 @@ def run():
         _close_active_session(client, active_session, "session on shutdown")
         clear_session()
     sleep_controller.on_playback_stopped(win)
+    sleep_controller.await_wake(playing_again=True)
     clear_koshelf_properties(win)
 
     xbmc.log("Koshelf service stopped", xbmc.LOGINFO)

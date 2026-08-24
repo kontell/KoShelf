@@ -93,8 +93,8 @@
               <option label="30212">none</option>
               <option label="30213">screensaver_black</option>
               <option label="30214">screensaver_dim</option>
-              <option label="30215">screen_off_cec</option>
-              <option label="30216">screen_off_android</option>
+              <option label="30217">screensaver_user</option>
+              <option label="30216">screen_off</option>
             </options>
           </constraints>
           <control type="spinner" format="string"/>
@@ -112,7 +112,7 @@
           </control>
           <dependencies>
             <dependency type="visible">
-              <condition setting="sleep_screen_action" operator="isnot">none</condition>
+              <condition setting="sleep_screen_action" operator="!is">none</condition>
             </dependency>
           </dependencies>
         </setting>

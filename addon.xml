@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="plugin.audio.koshelf"
        name="Koshelf"
-       version="0.20.1"
+       version="0.21.0"
        provider-name="kontell">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
@@ -17,7 +17,7 @@
     <summary lang="en">AudioBookShelf client for Kodi</summary>
     <description lang="en">Browse and play audiobooks and podcasts from your AudioBookShelf server.</description>
     <license>MIT</license>
-    <news>v0.20.0 Sleep timer: fix pulsating screensaver; add Screen off (CEC) and Screen off (Android/Google TV) options alongside screensaver modes; numeric keypad for custom duration; last-used custom value shown in presets. Widget URLs with trailing slash now resolve correctly. Remove Comment label from book/episode info dialogs. Podcast and Author items now show info on the i button.</news>
+    <news>v0.21.0 Sleep timer: the screen overlay is gone — it could deadlock Kodi's UI after the timer expired, unrecoverably. The timer now uses Kodi's own screensaver and restores your screensaver settings afterwards. Screen off (HDMI-CEC) removed; the Android screen-off option is renamed to Linux/X11 only, which is where DPMS actually exists. New "Screensaver: my usual one" mode. Fixes: the idle-seconds setting dependency never parsed; Settings and unknown routes left their directory handle open; a trailing slash on any parameter but the last broke the route.</news>
     <assets>
       <icon>resources/icon.png</icon>
     </assets>

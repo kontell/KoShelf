@@ -1,3 +1,37 @@
+v0.21.0
+- Fix: the sleep timer could freeze Kodi outright. The full-screen overlay
+  it drew was an xbmcgui.WindowDialog that _expire() deliberately left open;
+  it outlived the service, survived the add-on being disabled, and once
+  ownerless the next Back press deadlocked Kodi's application thread inside
+  CScriptInvocationManager::Process(). Nothing rendered, no window would
+  activate, Application.Quit returned OK and did nothing, and SIGTERM was
+  ignored — only SIGKILL recovered it. The overlay is gone.
+- The sleep timer now uses Kodi's own screensaver instead of drawing its
+  own. It borrows screensaver.mode (an empty mode draws nothing) and
+  screensaver.disableforaudio (true by default, and it makes
+  ActivateScreenSaver a silent no-op during audio playback), and puts both
+  back when you come back. On expiry the screen is left dark and the
+  screensaver re-armed, because stopping playback drops it.
+- Removed: Screen off (HDMI-CEC). It needs peripheral.libcec, which does
+  not exist on Android and is not installed on a stock desktop Kodi; it
+  did nothing on either machine it was tested on.
+- Renamed: Screen off (Android / Google TV) is now "Turn the display off
+  (Linux/X11 only)", because that is what it is. Kodi has no DPMS
+  implementation on Android — the builtin returns without acting and
+  without logging. On Android the screensaver is used instead.
+- New: "Screensaver: my usual one", which activates whatever screensaver
+  you already have configured rather than forcing black or dim.
+- Fix: the "Idle seconds before screen action" setting used operator
+  "isnot", which Kodi does not have, so the whole dependency was discarded
+  and the setting showed even with the screen action set to None.
+- Fix: opening Settings from the add-on menu left its directory handle
+  open for as long as the dialog was up, and an unrecognised route never
+  closed one at all. Both now close, so a favourite or library node
+  pointing at them cannot hang.
+- Fix: a trailing slash on a plugin URL lands on the last query parameter,
+  not on "action". ?action=library&...&media_type=book/ matched neither
+  branch and returned an empty folder with no error.
+
 v0.20.0
 - Sleep timer screen options restructured: single "Screen action" setting
   with five modes — Screensaver: Black, Screensaver: Dim, Screen off

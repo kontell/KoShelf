@@ -520,7 +520,16 @@ def route_set_sleep_timer():
 
 
 def route_settings():
-    """Open addon settings dialog."""
+    """Open the add-on settings dialog.
+
+    The handle is closed first, deliberately: openSettings() is modal, and
+    whoever asked for this directory — a favourite, a library node, a widget —
+    is blocked inside GetDirectory until the handle closes. Closing afterwards
+    means blocking them for as long as the dialog is open.
+    """
+    xbmcplugin.endOfDirectory(
+        HANDLE, succeeded=False, updateListing=False, cacheToDisc=False
+    )
     ADDON.openSettings()
 
     # After settings close, refresh the config file for inputstream.tempo.
@@ -1298,7 +1307,12 @@ def route_play_episode(client, item_id, episode_id):
 
 def router():
     """Parse the plugin URL and dispatch to the right handler."""
-    params = parse_qs(sys.argv[2][1:])
+    # Kodi writes library-node and favourite paths with a trailing slash, and
+    # it lands on whichever query parameter comes last — not necessarily
+    # 'action'. Stripping it off the action alone fixed only the routes that
+    # take no other parameter: '&media_type=book/' matched neither branch of
+    # route_library and returned an empty folder with no error at all.
+    params = parse_qs(sys.argv[2][1:].rstrip("/"))
 
     # Unwrap single-value lists
     args = {}
@@ -1307,9 +1321,10 @@ def router():
 
     client = get_client()
     if not client:
+        xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
         return
 
-    action = args.get("action", "").rstrip("/")
+    action = args.get("action", "")
 
     if not action:
         route_root(client)
@@ -1363,6 +1378,13 @@ def router():
         route_speed_dialog()
     elif action == "set_sleep_timer":
         route_set_sleep_timer()
+    else:
+        # An unrecognised route still has to close its handle. Without this the
+        # caller waits in CScriptRunner's first loop, which has no timeout at
+        # all — harmless today only because the interpreter dies and releases
+        # it, and an unbounded hang the moment reuselanguageinvoker is on.
+        xbmc.log("Koshelf: unknown action {!r}".format(action), xbmc.LOGWARNING)
+        xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
 
 
 if __name__ == "__main__":
