@@ -5,7 +5,7 @@ import xbmc
 from abs_auth import PLAYBACK_MIN_REMAINING_SECONDS
 from abs_http import Http, HttpError, Unauthorized, Unreachable
 
-CLIENT_NAME = "Koshelf"
+CLIENT_NAME = "Kotome"
 
 
 class ABSClient:
@@ -20,7 +20,7 @@ class ABSClient:
         # An abs_auth.Credentials, when there is one. Lets a 401 be answered
         # with a token refresh instead of an error the user has to read.
         self._auth = auth
-        self.device_id = getattr(auth, "device_id", "") or "kodi-koshelf"
+        self.device_id = getattr(auth, "device_id", "") or "kodi-kotome"
         self.session = Http(verify=verify)
         self._set_token(token)
 
@@ -93,7 +93,7 @@ class ABSClient:
         if not self._auth.refresh_now(self.session, min_remaining=0):
             return False
         self._set_token(self._auth.bearer)
-        xbmc.log("Koshelf: access token refreshed", xbmc.LOGINFO)
+        xbmc.log("Kotome: access token refreshed", xbmc.LOGINFO)
         return True
 
     def ensure_fresh_token(self, min_remaining=None):

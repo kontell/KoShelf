@@ -1,4 +1,4 @@
-"""Koshelf - background service for playback progress sync, resume, and audiobook features."""
+"""Kotome - background service for playback progress sync, resume, and audiobook features."""
 
 import json
 import os
@@ -10,6 +10,7 @@ import xbmcgui
 import xbmcvfs
 
 import abs_auth
+import migrate
 from abs_api import ABSClient
 
 ADDON = xbmcaddon.Addon()
@@ -22,7 +23,7 @@ SLEEP_STATE_FILE = os.path.join(PROFILE_DIR, "sleep_state.json")
 # keymap acts on ours and not on another add-on's. A patched YouTube drives
 # the same add-on; on the shared paths an audiobook at 2.0x and a video at
 # 1.5x overwrote each other's rate.
-OWNER = "plugin.audio.koshelf"
+OWNER = "plugin.audio.kotome"
 TEMPO_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo." + OWNER)
 CONFIG_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo_config." + OWNER)
 # The sentinel stays shared: it is the single "the keys are live" flag.
@@ -158,16 +159,16 @@ def _close_active_session(client, session, label="session"):
     try:
         if last < 5 and start > 30:
             xbmc.log(
-                "Koshelf: skip sync on close ({} last={:.0f}s, "
+                "Kotome: skip sync on close ({} last={:.0f}s, "
                 "start={:.0f}s — playback never resumed)".format(label, last, start),
                 xbmc.LOGINFO,
             )
         else:
             client.sync_session(sid, last, dur, 0)
         client.close_session(sid)
-        xbmc.log("Koshelf: closed {} {}".format(label, sid), xbmc.LOGINFO)
+        xbmc.log("Kotome: closed {} {}".format(label, sid), xbmc.LOGINFO)
     except Exception as e:
-        xbmc.log("Koshelf: error closing {}: {}".format(label, e), xbmc.LOGWARNING)
+        xbmc.log("Kotome: error closing {}: {}".format(label, e), xbmc.LOGWARNING)
 
 
 def _jsonrpc(method, params=None):
@@ -179,7 +180,7 @@ def _jsonrpc(method, params=None):
         resp = json.loads(xbmc.executeJSONRPC(json.dumps(req)))
         return resp.get("result", {}) or {}
     except Exception as e:
-        xbmc.log("Koshelf: JSON-RPC error ({}): {}".format(method, e), xbmc.LOGWARNING)
+        xbmc.log("Kotome: JSON-RPC error ({}): {}".format(method, e), xbmc.LOGWARNING)
         return {}
 
 
@@ -224,6 +225,29 @@ def _get_setting(setting_id):
 
 def _set_setting(setting_id, value):
     _jsonrpc("Settings.SetSettingValue", {"setting": setting_id, "value": value})
+
+
+# Window properties are a public interface: a skin can be keyed on them, and
+# renaming one breaks it with no warning and no error. Both names are written
+# for the whole 1.x line; the Koshelf.* aliases go in 2.0.
+_PROPERTY_PREFIXES = ("Kotome", "Koshelf")
+
+_PROPERTY_NAMES = (
+    "ChapterName",
+    "NowPlaying.Title",
+    "NowPlaying.Author",
+    "SleepTimerRemaining",
+)
+
+
+def _set_property(win, name, value):
+    for prefix in _PROPERTY_PREFIXES:
+        win.setProperty("{}.{}".format(prefix, name), value)
+
+
+def _clear_property(win, name):
+    for prefix in _PROPERTY_PREFIXES:
+        win.clearProperty("{}.{}".format(prefix, name))
 
 
 class SleepModeController:
@@ -292,10 +316,10 @@ class SleepModeController:
                 if xbmc.getCondVisibility("System.DPMSActive"):
                     xbmc.executebuiltin("ToggleDPMS")
             os.remove(SLEEP_STATE_FILE)
-            xbmc.log("Koshelf: restored orphaned sleep-mode state", xbmc.LOGINFO)
+            xbmc.log("Kotome: restored orphaned sleep-mode state", xbmc.LOGINFO)
         except Exception as e:
             xbmc.log(
-                "Koshelf: error restoring sleep state: {}".format(e), xbmc.LOGWARNING
+                "Kotome: error restoring sleep state: {}".format(e), xbmc.LOGWARNING
             )
 
     def tick(self, player, win):
@@ -310,7 +334,7 @@ class SleepModeController:
             self._enter()
         elif not sleep_file_exists and self.active:
             self._exit()
-            win.clearProperty("Koshelf.SleepTimerRemaining")
+            _clear_property(win, "SleepTimerRemaining")
             return False
 
         if not self.active:
@@ -321,19 +345,19 @@ class SleepModeController:
                 end_time = float(f.read().strip())
         except Exception:
             self._exit()
-            win.clearProperty("Koshelf.SleepTimerRemaining")
+            _clear_property(win, "SleepTimerRemaining")
             return False
 
         remaining = end_time - time.time()
 
         if remaining <= 0:
             self._expire(player)
-            win.clearProperty("Koshelf.SleepTimerRemaining")
+            _clear_property(win, "SleepTimerRemaining")
             return True
 
         mins = int(remaining) // 60
         secs = int(remaining) % 60
-        win.setProperty("Koshelf.SleepTimerRemaining", "{}:{:02d}".format(mins, secs))
+        _set_property(win, "SleepTimerRemaining", "{}:{:02d}".format(mins, secs))
 
         self._maybe_fire_screen_action()
         self._maybe_ramp_volume(remaining)
@@ -350,7 +374,7 @@ class SleepModeController:
                 pass
         if self.active:
             self._exit()
-        win.clearProperty("Koshelf.SleepTimerRemaining")
+        _clear_property(win, "SleepTimerRemaining")
 
     def _enter(self):
         self.active = True
@@ -366,7 +390,7 @@ class SleepModeController:
             # without acting and without logging. Fall back to the screensaver
             # rather than promise a dark screen we cannot deliver.
             xbmc.log(
-                "Koshelf: screen_off is Linux/X11 only — using the screensaver "
+                "Kotome: screen_off is Linux/X11 only — using the screensaver "
                 "on this platform",
                 xbmc.LOGINFO,
             )
@@ -398,7 +422,7 @@ class SleepModeController:
         except IOError:
             pass
         xbmc.log(
-            "Koshelf: sleep mode entered (action={}, "
+            "Kotome: sleep mode entered (action={}, "
             "volume={})".format(self._screen_action, vol),
             xbmc.LOGINFO,
         )
@@ -419,12 +443,12 @@ class SleepModeController:
                 os.remove(SLEEP_STATE_FILE)
         except OSError:
             pass
-        xbmc.log("Koshelf: sleep mode exited", xbmc.LOGINFO)
+        xbmc.log("Kotome: sleep mode exited", xbmc.LOGINFO)
         self._reset()
 
     def _expire(self, player):
         """Timer fired — stop playback, restore volume, leave screen dark."""
-        xbmc.log("Koshelf: sleep timer expired, stopping playback", xbmc.LOGINFO)
+        xbmc.log("Kotome: sleep timer expired, stopping playback", xbmc.LOGINFO)
         try:
             player.stop()
         except Exception:
@@ -447,7 +471,7 @@ class SleepModeController:
             self._redarken_pending = True
             self._wake_polls = 0
             xbmc.log(
-                "Koshelf: screen left dark; settings restore deferred to wake",
+                "Kotome: screen left dark; settings restore deferred to wake",
                 xbmc.LOGINFO,
             )
         else:
@@ -517,7 +541,7 @@ class SleepModeController:
         self._wake_polls = 0
         self._saved_saver_mode = None
         self._saved_saver_audio = None
-        xbmc.log("Koshelf: user returned — screensaver settings restored", xbmc.LOGINFO)
+        xbmc.log("Kotome: user returned — screensaver settings restored", xbmc.LOGINFO)
 
     def _reset(self, keep_awaiting=False):
         self.active = False
@@ -577,13 +601,13 @@ class SleepModeController:
             xbmc.executebuiltin("ToggleDPMS")
             self._screen_action_fired = True
             xbmc.log(
-                "Koshelf: display off via DPMS (idle={})".format(idle), xbmc.LOGINFO
+                "Kotome: display off via DPMS (idle={})".format(idle), xbmc.LOGINFO
             )
         elif self._screen_action in _SAVER_FOR_ACTION:
             self._activate_screensaver()
             self._screen_action_fired = True
             xbmc.log(
-                "Koshelf: screensaver activated (idle={}, mode={})".format(
+                "Kotome: screensaver activated (idle={}, mode={})".format(
                     idle, self._screen_action
                 ),
                 xbmc.LOGINFO,
@@ -625,7 +649,7 @@ class SleepModeController:
             and cur != self.last_applied_volume
         ):
             xbmc.log(
-                "Koshelf: volume ramp backed off (user adjusted from "
+                "Kotome: volume ramp backed off (user adjusted from "
                 "{} to {})".format(self.last_applied_volume, cur),
                 xbmc.LOGINFO,
             )
@@ -638,7 +662,7 @@ class SleepModeController:
         self.last_applied_volume = target
 
 
-class KoshelfMonitor(xbmc.Monitor):
+class KotomeMonitor(xbmc.Monitor):
     """Detects addon settings changes and writes new tempo to the shared file."""
 
     def __init__(self):
@@ -649,8 +673,8 @@ class KoshelfMonitor(xbmc.Monitor):
         self.settings_changed = True
 
 
-def set_koshelf_properties(win, session_data, player, chapters):
-    """Update Koshelf-specific window properties during playback."""
+def set_kotome_properties(win, session_data, player, chapters):
+    """Update Kotome-specific window properties during playback."""
     try:
         current_time = player.getTime()
     except Exception:
@@ -659,28 +683,28 @@ def set_koshelf_properties(win, session_data, player, chapters):
     # Chapter display
     chapter_name = find_chapter(chapters, current_time)
     if chapter_name:
-        win.setProperty("Koshelf.ChapterName", chapter_name)
+        _set_property(win, "ChapterName", chapter_name)
 
     # Now playing info from session
     meta = session_data.get("media_metadata", {})
     if meta.get("title"):
-        win.setProperty("Koshelf.NowPlaying.Title", meta["title"])
+        _set_property(win, "NowPlaying.Title", meta["title"])
     if meta.get("author"):
-        win.setProperty("Koshelf.NowPlaying.Author", meta["author"])
+        _set_property(win, "NowPlaying.Author", meta["author"])
 
 
-def clear_koshelf_properties(win):
+def clear_kotome_properties(win):
     for prop in (
-        "Koshelf.ChapterName",
-        "Koshelf.NowPlaying.Title",
-        "Koshelf.NowPlaying.Author",
-        "Koshelf.SleepTimerRemaining",
+        "Kotome.ChapterName",
+        "Kotome.NowPlaying.Title",
+        "Kotome.NowPlaying.Author",
+        "Kotome.SleepTimerRemaining",
     ):
         win.clearProperty(prop)
 
 
 def run():
-    monitor = KoshelfMonitor()
+    monitor = KotomeMonitor()
     player = xbmc.Player()
     win = xbmcgui.Window(10000)
 
@@ -699,10 +723,10 @@ def run():
     sleep_controller = SleepModeController()
 
     # Seed the shared tempo config so speed.py has min/max/step ready even
-    # if the user triggers keys before opening playback from Koshelf.
+    # if the user triggers keys before opening playback from Kotome.
     write_config()
 
-    xbmc.log("Koshelf service started", xbmc.LOGINFO)
+    xbmc.log("Kotome service started", xbmc.LOGINFO)
 
     # 0.25s poll keeps the resume-seek latency down once the stream is ready,
     # so the user hears as little of the pre-resume audio as possible.
@@ -710,13 +734,13 @@ def run():
         if monitor.waitForAbort(0.25):
             break
 
-        # When the sentinel appears or disappears, refresh a Koshelf listing
+        # When the sentinel appears or disappears, refresh a Kotome listing
         # if that's what the user is currently looking at — so the root shows
         # the "Now playing" item without needing a manual re-entry.
         active_now = os.path.exists(ACTIVE_FILE)
         if active_now != last_active:
             folder = xbmc.getInfoLabel("Container.FolderPath") or ""
-            if "plugin.audio.koshelf" in folder:
+            if "plugin.audio.kotome" in folder:
                 xbmc.executebuiltin("Container.Refresh")
             last_active = active_now
 
@@ -740,7 +764,7 @@ def run():
                 client = None
                 chapters = []
                 clear_session()
-                clear_koshelf_properties(win)
+                clear_kotome_properties(win)
                 _release_sentinel()
             sleep_controller.on_playback_stopped(win)
             sleep_controller.await_wake()
@@ -766,10 +790,10 @@ def run():
             chapters = session_data.get("chapters", [])
             last_sync = time.time()
             client = get_client()
-            xbmc.log("Koshelf: tracking session {}".format(session_id), xbmc.LOGINFO)
+            xbmc.log("Kotome: tracking session {}".format(session_id), xbmc.LOGINFO)
 
-        # Update Koshelf window properties (chapter, now playing)
-        set_koshelf_properties(win, active_session, player, chapters)
+        # Update Kotome window properties (chapter, now playing)
+        set_kotome_properties(win, active_session, player, chapters)
 
         # Sleep timer + screensaver swap + volume ramp-down
         sleep_controller.tick(player, win)
@@ -805,11 +829,11 @@ def run():
                 active_session["last_time"] = current_time
                 client.sync_session(session_id, current_time, duration, listened)
                 xbmc.log(
-                    "Koshelf: synced {:.0f}s/{:.0f}s".format(current_time, duration),
+                    "Kotome: synced {:.0f}s/{:.0f}s".format(current_time, duration),
                     xbmc.LOGINFO,
                 )
             except Exception as e:
-                xbmc.log("Koshelf: sync error: {}".format(e), xbmc.LOGWARNING)
+                xbmc.log("Kotome: sync error: {}".format(e), xbmc.LOGWARNING)
 
     # Kodi is shutting down — close any active session and restore any
     # in-flight sleep-mode state so the user's screensaver/volume aren't
@@ -819,9 +843,9 @@ def run():
         clear_session()
     sleep_controller.on_playback_stopped(win)
     sleep_controller.await_wake(playing_again=True)
-    clear_koshelf_properties(win)
+    clear_kotome_properties(win)
 
-    xbmc.log("Koshelf service stopped", xbmc.LOGINFO)
+    xbmc.log("Kotome service stopped", xbmc.LOGINFO)
 
 
 if __name__ == "__main__":

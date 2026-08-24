@@ -45,7 +45,7 @@ jobs:
         # Replaces the py_compile block that used to live inside build.sh, so a
         # syntax error fails its own Check rather than the packaging step.
         # No mypy: see tox.ini for why, and what it would take to add.
-        run: python -m compileall -q main.py abs_api.py abs_http.py service.py tools/
+        run: python -m compileall -q main.py abs_api.py abs_http.py abs_auth.py migrate.py service.py tools/
 
   assets:
     name: assets
@@ -115,7 +115,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          zips=(dist/plugin.audio.koshelf-*.zip)
+          zips=(dist/plugin.audio.kotome-*.zip)
           if [[ ${#zips[@]} -ne 1 ]]; then
             echo "expected exactly one zip in dist/, got: ${zips[*]:-none}" >&2
             exit 1
@@ -135,7 +135,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: plugin.audio.koshelf-zip
+          name: plugin.audio.kotome-zip
           path: ${{ steps.name.outputs.zip }}
           retention-days: 14
           if-no-files-found: error

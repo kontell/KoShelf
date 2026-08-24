@@ -1,4 +1,4 @@
-"""Koshelf - AudioBookShelf client for Kodi."""
+"""Kotome - AudioBookShelf client for Kodi."""
 
 import html
 import os
@@ -17,12 +17,14 @@ import xbmcvfs
 
 import abs_auth
 import abs_http
+import migrate
 from abs_api import ABSClient
 
 # ── Plugin bootstrap ──
 
 ADDON = xbmcaddon.Addon()
 ADDON_ID = ADDON.getAddonInfo("id")
+PROFILE_DIR = xbmcvfs.translatePath(ADDON.getAddonInfo("profile"))
 # Re-read per invocation, not frozen at import: with reuselanguageinvoker the
 # module outlives the invocation that loaded it, so anything derived from
 # sys.argv is stale on every call after the first. Stale here would mean
@@ -38,54 +40,6 @@ def _refresh_invocation():
     except (IndexError, ValueError):
         HANDLE = -1
     BASE_URL = sys.argv[0]
-
-
-# Where the pre-0.24 build kept its session token. Read once, to migrate.
-LEGACY_TOKEN_FILE = os.path.join(
-    xbmcvfs.translatePath(ADDON.getAddonInfo("profile")), "token.json"
-)
-
-
-def _migrate_legacy_credentials(creds):
-    """Adopt a pre-0.24 login instead of making the user sign in again.
-
-    Older builds stored the username and password as plain settings and cached
-    the deprecated non-expiring token in token.json. The token still works, so
-    it is adopted as-is with no expiry; the password is cleared, because
-    keeping a plaintext password around was the thing worth fixing.
-    """
-    if creds.logged_in:
-        return creds
-    token = ""
-    try:
-        if os.path.exists(LEGACY_TOKEN_FILE):
-            with open(LEGACY_TOKEN_FILE, "r") as f:
-                token = json.load(f).get("token", "")
-    except Exception:
-        token = ""
-    if not token or not creds.server_url:
-        return creds
-    creds.access_token = token
-    creds.refresh_token = ""
-    # 0 = no expiry known. The legacy token does not expire, so nothing will
-    # try to refresh it — and there is no refresh token to try with.
-    creds.expires_at = 0
-    creds.user_name = ADDON.getSetting("username") or creds.user_name
-    if not creds.server_name:
-        creds.server_name = urlsplit(creds.server_url).netloc or creds.server_url
-    creds.logged_in = True
-    creds.save()
-    for stale in ("username", "password"):
-        try:
-            ADDON.setSetting(stale, "")
-        except Exception:
-            pass
-    try:
-        os.remove(LEGACY_TOKEN_FILE)
-    except OSError:
-        pass
-    xbmc.log("Koshelf: migrated pre-0.24 credentials; password cleared", xbmc.LOGINFO)
-    return creds
 
 
 # ssl.create_default_context() loads the system CA bundle, which is not free,
@@ -105,11 +59,12 @@ def get_client(prompt=True):
     on every listing whose result was thrown away. An expired token announces
     itself on the next real request, and ABSClient answers it with a refresh.
     """
-    creds = _migrate_legacy_credentials(abs_auth.Credentials(ADDON))
+    migrate.run_migrations(ADDON, PROFILE_DIR)
+    creds = abs_auth.Credentials(ADDON)
     if not creds.has_credentials:
         if prompt:
             xbmcgui.Dialog().ok(
-                "Koshelf",
+                "Kotome",
                 "Sign in to your AudioBookShelf server to get started.",
             )
             ADDON.openSettings()
@@ -462,16 +417,16 @@ def _apply_sorts(methods, content="albums"):
 def route_root(client):
     """Root menu: Continue Listening + libraries + settings."""
     # Now playing + Sleep timer — only shown when tempo is the active
-    # inputstream (i.e. something Koshelf is playing). Same gating, so the
+    # inputstream (i.e. something Kotome is playing). Same gating, so the
     # row only appears when there's something to act on.
     if os.path.exists(ACTIVE_FILE):
         win = xbmcgui.Window(10000)
-        title = win.getProperty("Koshelf.NowPlaying.Title") or "current track"
+        title = win.getProperty("Kotome.NowPlaying.Title") or "current track"
         speed = win.getProperty("InputstreamTempo.SpeedDisplay") or "1.0x"
         label = "[COLOR orange]{}[/COLOR] [B]Now playing[/B]: {}".format(speed, title)
         add_directory(label, action="speed_dialog")
 
-        sleep_remaining = win.getProperty("Koshelf.SleepTimerRemaining")
+        sleep_remaining = win.getProperty("Kotome.SleepTimerRemaining")
         if sleep_remaining:
             sleep_label = "[COLOR orange]{}[/COLOR] [B]Sleep timer[/B]".format(
                 sleep_remaining
@@ -704,7 +659,7 @@ def route_settings():
 
 
 def _notify(message, seconds=4):
-    xbmcgui.Dialog().notification("Koshelf", message, time=seconds * 1000)
+    xbmcgui.Dialog().notification("Kotome", message, time=seconds * 1000)
 
 
 def route_login():
@@ -731,18 +686,18 @@ def route_login():
         status = abs_auth.server_status(http, address)
     except (abs_http.HttpError, abs_http.Unreachable) as error:
         xbmc.log(
-            "Koshelf: server probe failed for {}: {}".format(address, error),
+            "Kotome: server probe failed for {}: {}".format(address, error),
             xbmc.LOGWARNING,
         )
         xbmcgui.Dialog().ok(
-            "Koshelf",
+            "Kotome",
             "Could not reach a server at\n{}\n\nCheck the address and that "
             "the server is running.".format(address),
         )
         return
     if status.get("app") != "audiobookshelf":
         xbmcgui.Dialog().ok(
-            "Koshelf",
+            "Kotome",
             "Something answered at\n{}\nbut it is not an AudioBookShelf "
             "server.".format(address),
         )
@@ -756,17 +711,17 @@ def route_login():
     try:
         result = abs_auth.login(http, address, username, password)
     except abs_http.Unauthorized:
-        xbmcgui.Dialog().ok("Koshelf", "That username or password was not accepted.")
+        xbmcgui.Dialog().ok("Kotome", "That username or password was not accepted.")
         return
     except (abs_http.HttpError, abs_http.Unreachable) as error:
-        xbmc.log("Koshelf: sign-in failed: {}".format(error), xbmc.LOGERROR)
-        xbmcgui.Dialog().ok("Koshelf", "Sign-in failed: {}".format(error))
+        xbmc.log("Kotome: sign-in failed: {}".format(error), xbmc.LOGERROR)
+        xbmcgui.Dialog().ok("Kotome", "Sign-in failed: {}".format(error))
         return
     finally:
         http.close()
 
     if not result.access_token:
-        xbmcgui.Dialog().ok("Koshelf", "The server did not return a token.")
+        xbmcgui.Dialog().ok("Kotome", "The server did not return a token.")
         return
 
     creds.apply(result, address=address, server_name=server_name)
@@ -776,7 +731,7 @@ def route_login():
     _client_cache["key"] = None
     _notify("Signed in as {}".format(creds.user_name))
     xbmc.log(
-        "Koshelf: signed in to {} as {}".format(address, creds.user_name), xbmc.LOGINFO
+        "Kotome: signed in to {} as {}".format(address, creds.user_name), xbmc.LOGINFO
     )
 
 
@@ -786,7 +741,7 @@ def route_logout():
         _notify("Not signed in")
         return
     if not xbmcgui.Dialog().yesno(
-        "Koshelf", "Sign out of {}?".format(creds.server_name or creds.server_url)
+        "Kotome", "Sign out of {}?".format(creds.server_name or creds.server_url)
     ):
         return
     http = abs_auth.transport(verify=_verify_ssl())
@@ -801,13 +756,13 @@ def route_logout():
 def route_test_connection():
     creds = abs_auth.Credentials(ADDON)
     if not creds.has_credentials:
-        xbmcgui.Dialog().ok("Koshelf", "Sign in first.")
+        xbmcgui.Dialog().ok("Kotome", "Sign in first.")
         return
     client = ABSClient.from_credentials(creds, verify=_verify_ssl())
     libraries = client.get_libraries()
     if libraries:
         xbmcgui.Dialog().ok(
-            "Koshelf",
+            "Kotome",
             "Connected to {}\n\n{} librar{}: {}".format(
                 creds.server_name or creds.server_url,
                 len(libraries),
@@ -823,7 +778,7 @@ def route_test_connection():
         message = "Could not reach the server:\n{}".format(error)
     else:
         message = "Connected, but the account can see no libraries."
-    xbmcgui.Dialog().ok("Koshelf", message)
+    xbmcgui.Dialog().ok("Kotome", message)
 
 
 def route_continue_listening(client):
@@ -1347,7 +1302,6 @@ def route_search(client, library_id, media_type):
 
 # ── Playback ──
 
-PROFILE_DIR = xbmcvfs.translatePath(ADDON.getAddonInfo("profile"))
 SESSION_FILE = os.path.join(PROFILE_DIR, "session.json")
 SPEEDS_FILE = os.path.join(PROFILE_DIR, "speeds.json")
 SLEEP_FILE = os.path.join(PROFILE_DIR, "sleep_timer")
@@ -1355,7 +1309,7 @@ SLEEP_FILE = os.path.join(PROFILE_DIR, "sleep_timer")
 # keymap acts on ours and not on another add-on's. A patched YouTube drives
 # the same add-on; on the shared paths an audiobook at 2.0x and a video at
 # 1.5x overwrote each other's rate.
-OWNER = "plugin.audio.koshelf"
+OWNER = "plugin.audio.kotome"
 TEMPO_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo." + OWNER)
 CONFIG_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo_config." + OWNER)
 # The sentinel stays shared: it is the single "the keys are live" flag.
@@ -1666,7 +1620,7 @@ def router():
         # caller waits in CScriptRunner's first loop, which has no timeout at
         # all — harmless today only because the interpreter dies and releases
         # it, and an unbounded hang the moment reuselanguageinvoker is on.
-        xbmc.log("Koshelf: unknown action {!r}".format(action), xbmc.LOGWARNING)
+        xbmc.log("Kotome: unknown action {!r}".format(action), xbmc.LOGWARNING)
         xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
 
 

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.audio.koshelf"
-       name="Koshelf"
-       version="0.24.0"
+<addon id="plugin.audio.kotome"
+       name="Kotome"
+       version="1.0.0"
        provider-name="kontell">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
@@ -19,10 +19,10 @@
          close its handle — see router() in main.py. -->
     <reuselanguageinvoker>true</reuselanguageinvoker>
     <platform>all</platform>
-    <summary lang="en">AudioBookShelf client for Kodi</summary>
-    <description lang="en">Browse and play audiobooks and podcasts from your AudioBookShelf server.</description>
+    <summary lang="en">AudioBookShelf client with tempo</summary>
+    <description lang="en">Browse and play audiobooks and podcasts from your AudioBookShelf server, at whatever speed you like. Playback speed is adjustable per book with pitch correction, progress syncs back to the server, and a sleep timer fades out and stops on its own.</description>
     <license>MIT</license>
-    <news>v0.24.0 Sign-in reworked. Your password is no longer stored: there is a Sign in button that exchanges it for tokens once and forgets it, plus Test connection and Sign out. Existing installs migrate automatically and the stored password is cleared. Now uses AudioBookShelf's current access/refresh token model with automatic renewal, instead of the token the server marks deprecated. Added an HTTPS certificate option and a per-install device ID.</news>
+    <news>v1.0.0 Koshelf is now Kotome. The add-on id changed, so Kodi installs it as a new add-on: your server, sign-in and per-book speeds are carried over automatically the first time it runs, and the old Koshelf entry can be uninstalled once you have checked it worked. Nothing else changed in this release.</news>
     <assets>
       <icon>resources/icon.png</icon>
       <fanart>resources/fanart.jpg</fanart>

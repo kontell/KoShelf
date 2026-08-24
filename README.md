@@ -1,4 +1,4 @@
-# Koshelf
+# Kotome
 
 Kodi client for [AudioBookShelf](https://www.audiobookshelf.org/). Browse and
 play audiobooks and podcasts from your ABS server with pitch-corrected tempo
@@ -23,8 +23,8 @@ control, resume across devices, and per-book playback speed memory.
    [`repository.kontell`](https://github.com/kontell/repository.kontell).
 2. From the repository, install:
    - **inputstream.tempo**
-   - **Koshelf**
-3. Open Koshelf, set your server URL and credentials under
+   - **Kotome**
+3. Open Kotome, set your server URL and credentials under
    *Settings → General*.
 
 ## Supported platforms

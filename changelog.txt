@@ -1,3 +1,14 @@
+v1.0.0
+- Koshelf is now Kotome. The name collided with an unrelated project.
+- The add-on id changed to plugin.audio.kotome, so Kodi installs this as a
+  new add-on rather than an update. Your server address, sign-in and
+  per-book speeds are carried over automatically the first time it runs.
+  Once you have checked it worked, the old Koshelf entry can be uninstalled;
+  its data is left alone rather than deleted.
+- Skin properties are published under both Kotome.* and Koshelf.* names for
+  the whole 1.x line, so anything keyed on the old names keeps working.
+- Nothing else changed in this release.
+
 v0.24.0
 - Your password is no longer stored. Sign-in is a button in Settings that
   asks for the password once, exchanges it for tokens, and forgets it. An

@@ -161,7 +161,7 @@ class Credentials:
         self.expires_at = _as_float(self._addon.getSetting("token_expires_at"))
         self.logged_in = self._addon.getSetting("logged_in") == "true"
         if not self.device_id:
-            # Per install, not a constant shared by every Koshelf in the
+            # Per install, not a constant shared by every Kotome in the
             # world: ABS keys its session list on this, and a shared id makes
             # every user look like the same device.
             self.device_id = uuid.uuid4().hex
