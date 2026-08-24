@@ -1,117 +1,74 @@
+Kotome 1.0.0 is the first release under this name. It was previously called
+Koshelf (plugin.audio.koshelf), which is no longer maintained. Kotome
+installs as a separate add-on and carries nothing over, so sign in once and
+set your preferences; uninstall Koshelf whenever you like. Entries below
+1.0.0 are Koshelf's history, kept for the record.
+
 v1.0.0
-- Koshelf is now Kotome. The name collided with an unrelated project.
-- The add-on id changed to plugin.audio.kotome, so Kodi installs this as a
-  new add-on rather than an update. Your server address, sign-in and
-  per-book speeds are carried over automatically the first time it runs.
-  Once you have checked it worked, the old Koshelf entry can be uninstalled;
-  its data is left alone rather than deleted.
-- Skin properties are published under both Kotome.* and Koshelf.* names for
-  the whole 1.x line, so anything keyed on the old names keeps working.
-- Nothing else changed in this release.
+Sleep timer
+- The screen overlay is gone. It could deadlock Kodi: the full-screen
+  window it drew outlived the service, survived the add-on being disabled,
+  and once ownerless the next Back press froze the whole UI unrecoverably.
+  The timer now uses Kodi's own screensaver and puts your screensaver
+  settings back when you return.
+- Removed Screen off (HDMI-CEC): it needs peripheral.libcec, which does not
+  exist on Android and is not on a stock desktop Kodi.
+- "Screen off (Android / Google TV)" is now "Turn the display off
+  (Linux/X11 only)", which is where DPMS actually exists. On Android the
+  screensaver is used instead.
+- New "Screensaver: my usual one" mode.
+- Fix: the idle-seconds setting used an operator Kodi does not have, so the
+  whole dependency was discarded and the setting showed even with the
+  screen action set to None.
 
-v0.24.0
-- Your password is no longer stored. Sign-in is a button in Settings that
-  asks for the password once, exchanges it for tokens, and forgets it. An
-  existing install is migrated automatically on first run — you stay signed
-  in, and the stored plaintext password is cleared.
-- Uses AudioBookShelf's current token model: a one-hour access token plus a
-  refresh token, refreshed automatically when it expires and again before
-  playback starts. The old login read user.token, which the server source
-  marks "Old non-expiring token" — it still works and is still accepted from
-  older servers, but nothing new is issued on it.
-- Settings now shows which server and account you are signed in to, with
-  Test connection and Sign out buttons.
-- The server address accepts a bare host name (http, port 13378), host:port,
-  or a full URL.
-- Signing in checks the address before asking for a password, so a typo
-  reads as "could not reach that server" rather than a failed login.
-- New: Verify HTTPS certificate, for a server behind a self-signed one.
-- Each install now identifies itself to the server with its own device ID
-  instead of a constant shared by every copy of the add-on.
-- Books and Continue Listening have their own icons.
-
-v0.23.0
-- The sort menu now works. Picking "Recently added" returned the right page
-  from the server and then Kodi re-sorted it alphabetically, because the
-  listing also registered SORT_METHOD_TITLE — Container.SortMethod read
-  "Title" while the sort menu said otherwise. Server-sorted listings now
-  register only SORT_METHOD_UNSORTED, so the server's order is what you see.
-- The sort picker moved from a row in the list to the context menu, where it
-  is available on every item and every page instead of only at the top of
-  page one. The current sort is shown in the breadcrumb.
-- More sorts: author Z-A, narrator, series, oldest added, published year
-  ascending, and size.
-- In-progress books and episodes now carry a real Kodi resume point instead
-  of "[42%]" in the title. Skins draw their own in-progress indicator from
-  it, Kodi offers Resume / Start from beginning, and finished items are
-  marked watched. The percentage text is gone, and with it the reason
-  Continue Listening could not be sorted by title.
-- Narrator, duration, genre and year moved out of the label and into the
-  info tag, where the skin can lay them out — in Contuary the label markup
-  was not rendered at all, while the duration as a tag gets its own column.
-- Every folder now has an icon, using Kodi's own Default*.png names so they
-  match whatever skin you run. Sort, Next page and Log in use bundled
-  Material Symbols, which is all Kodi has no icon for.
-- Menu listings use an empty content type. With "files" the skin drew its own
-  folder icon over the one the item carried, so every row looked identical.
-- Books and podcasts without a cover on the server now show the bundled
-  placeholder instead of a broken image.
-- Added fan art.
-- Removed the Music player (PAPlayer) option. It was not supported.
-- Fix: a book whose published year is a full date ("2024-12-17" is a real
-  value from ABS metadata) crashed the whole listing.
-
-v0.22.0
-- Browsing is roughly five times faster. Every listing used to spend
-  0.8-1.6 s starting up before it did any work at all, most of it
-  "import requests" — measured on a desktop; an ARM box pays a multiple.
-  Root menu 0.91 s -> 0.18 s, Authors 1.08 s -> 0.09 s.
-- requests is replaced by a small standard-library HTTP transport. A plugin
-  invocation makes one to three calls and exits, so requests' connection
-  pooling never repaid its import cost. The script.module.requests
-  dependency is gone.
-- Interpreter reuse (reuselanguageinvoker) is on, which takes the startup
-  cost to zero on repeat invocations. Note that add-on code changes now
-  need a disable/enable bounce to take effect.
+Speed
+- Browsing is roughly ten times faster. Every listing used to spend
+  0.8-1.6 s starting up before doing any work, most of it importing a
+  library that a short-lived plugin process cannot benefit from. Root menu
+  0.91 s -> 0.08 s, Authors 1.08 s -> 0.09 s on a desktop; an ARM box saves
+  considerably more.
 - The cached token is no longer checked with a throwaway API call on every
-  single listing. An expired token is handled where it shows up instead.
-- The progress map (/api/me, ~59 KB) and the API client are cached between
-  invocations with a short TTL, so a second folder in a row is nearly free.
-  Responses are now gzipped.
+  listing, and your progress data is fetched once rather than per folder.
 
-v0.21.0
-- Fix: the sleep timer could freeze Kodi outright. The full-screen overlay
-  it drew was an xbmcgui.WindowDialog that _expire() deliberately left open;
-  it outlived the service, survived the add-on being disabled, and once
-  ownerless the next Back press deadlocked Kodi's application thread inside
-  CScriptInvocationManager::Process(). Nothing rendered, no window would
-  activate, Application.Quit returned OK and did nothing, and SIGTERM was
-  ignored — only SIGKILL recovered it. The overlay is gone.
-- The sleep timer now uses Kodi's own screensaver instead of drawing its
-  own. It borrows screensaver.mode (an empty mode draws nothing) and
-  screensaver.disableforaudio (true by default, and it makes
-  ActivateScreenSaver a silent no-op during audio playback), and puts both
-  back when you come back. On expiry the screen is left dark and the
-  screensaver re-armed, because stopping playback drops it.
-- Removed: Screen off (HDMI-CEC). It needs peripheral.libcec, which does
-  not exist on Android and is not installed on a stock desktop Kodi; it
-  did nothing on either machine it was tested on.
-- Renamed: Screen off (Android / Google TV) is now "Turn the display off
-  (Linux/X11 only)", because that is what it is. Kodi has no DPMS
-  implementation on Android — the builtin returns without acting and
-  without logging. On Android the screensaver is used instead.
-- New: "Screensaver: my usual one", which activates whatever screensaver
-  you already have configured rather than forcing black or dim.
-- Fix: the "Idle seconds before screen action" setting used operator
-  "isnot", which Kodi does not have, so the whole dependency was discarded
-  and the setting showed even with the screen action set to None.
-- Fix: opening Settings from the add-on menu left its directory handle
-  open for as long as the dialog was up, and an unrecognised route never
-  closed one at all. Both now close, so a favourite or library node
-  pointing at them cannot hang.
-- Fix: a trailing slash on a plugin URL lands on the last query parameter,
-  not on "action". ?action=library&...&media_type=book/ matched neither
-  branch and returned an empty folder with no error.
+Browsing
+- The sort menu now works. Picking "Recently added" returned the right page
+  from the server and then Kodi re-sorted it alphabetically.
+- The sort picker moved to the context menu, so it is on every item and
+  every page rather than only at the top of page one. More sorts: author
+  Z-A, narrator, series, oldest added, published year ascending, size.
+- In-progress books and episodes carry a real Kodi resume point instead of
+  "[42%]" in the title, so skins show their own progress indicator and Kodi
+  offers Resume / Start from beginning. Finished books are marked watched.
+- Narrator, duration, genre and year moved out of the label into the info
+  tag, where the skin can lay them out.
+- Every folder has an icon. Books and Continue Listening have their own;
+  the rest use Kodi's, so they match whatever skin you run.
+- Books and podcasts with no cover on the server show a placeholder instead
+  of a broken image.
+- Added fan art. Note that some skins have fanart backgrounds turned off —
+  in Contuary it is Settings, "No fanart".
+- Removed the Music player (PAPlayer) option. It was not supported.
+- Fix: a book whose published year is a full date crashed the listing.
+
+Account
+- Your password is no longer stored. Sign in is a button in Settings that
+  asks once, exchanges it for tokens, and forgets it.
+- Uses AudioBookShelf's current token model — a one-hour access token plus
+  a refresh token, renewed automatically and again before playback starts.
+  The previous login used a token the server marks deprecated.
+- Settings shows which server and account you are signed in to, with Test
+  connection and Sign out.
+- The server address accepts a bare host name, host:port, or a full URL,
+  and is checked before you are asked for a password.
+- New: Verify HTTPS certificate, for a server behind a self-signed one.
+- Each install identifies itself to the server with its own device ID.
+
+Fixes
+- Opening Settings from the add-on menu, or hitting an unrecognised route,
+  left a directory handle open; a favourite or library node pointing at
+  either could hang.
+- A trailing slash on a plugin URL broke any route whose last parameter was
+  not the action.
 
 v0.20.0
 - Sleep timer screen options restructured: single "Screen action" setting

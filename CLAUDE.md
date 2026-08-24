@@ -2,7 +2,7 @@
 
 AudioBookShelf client for Kodi. Pure Python addon (`plugin.audio` + `<provides>audio</provides>`). VideoPlayer is selected at playback time via the ListItem's `VideoInfoTag` (mediaType `musicvideo`), not via `<provides>video</provides>` — that tag only controls whether the addon appears under Video add-ons in the browser, and including it makes the i (info) button no-op there because Kodi opens DialogVideoInfo instead of DialogMusicInfo.
 
-Was `plugin.audio.koshelf` / "Koshelf" until 1.0.0. The name collided with an unrelated project.
+Was `plugin.audio.koshelf` / "Koshelf" until 1.0.0. The name collided with an unrelated project, and Koshelf is abandoned rather than upgraded: Kodi treats the changed id as a different add-on, and nothing is migrated from it. There is deliberately no migration code — it existed briefly and was removed.
 
 ## Architecture
 
@@ -11,7 +11,6 @@ Was `plugin.audio.koshelf` / "Koshelf" until 1.0.0. The name collided with an un
 - `abs_api.py` — AudioBookShelf REST API client
 - `abs_auth.py` — address normalisation, the three auth calls, and the `Credentials` record. Deliberately dialog-free, which makes it the only module testable without a Kodi
 - `abs_http.py` — stdlib HTTP transport with typed errors. No Kodi imports at all
-- `migrate.py` — one-shot migrations, called by both entry points
 
 ## Interpreter reuse
 
@@ -112,15 +111,6 @@ Two traps found the hard way:
 
 - **The operator is `!is`, not `isnot`.** `isnot` logs `unknown operator` and discards the *whole* dependency, so the setting it guards shows unconditionally.
 - **A new `30xxx` string id does not resolve after an add-on disable/enable bounce.** The settings dialog renders every new label blank until Kodi itself restarts, which is what clears the add-on string cache.
-
-`username` and `password` are still declared, hidden and empty, purely so the migration can clear them: `setSetting()` on an id `settings.xml` does not declare is ignored, so removing the declarations would leave the old plaintext password in the profile forever.
-
-## Migrations
-
-`migrate.run_migrations()` is called by both entry points, because either can be first to start after an upgrade. Everything in it is idempotent and fails quietly.
-
-- **From `plugin.audio.koshelf`**: Kodi treats a changed id as a different add-on, so nothing under `addon_data/` comes across on its own. The old `settings.xml` is read off disk (the old add-on may not be installed, and if it is, Kodi would hand back its in-memory copy) and written through `setSetting` so Kodi owns the values properly. `speeds.json` is copied. Guarded by `migrated_from_koshelf`.
-- **From pre-0.24**: adopts `token.json`, clears the stored password.
 
 ## Build
 

@@ -10,7 +10,6 @@ import xbmcgui
 import xbmcvfs
 
 import abs_auth
-import migrate
 from abs_api import ABSClient
 
 ADDON = xbmcaddon.Addon()

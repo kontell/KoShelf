@@ -256,27 +256,10 @@
           <constraints><allowempty>true</allowempty></constraints>
           <control type="edit" format="string"/>
         </setting>
-        <setting id="migrated_from_koshelf" type="boolean">
-          <level>0</level><default>false</default><visible>false</visible>
-          <control type="toggle"/>
-        </setting>
         <setting id="device_id" type="string">
           <level>0</level><default></default><visible>false</visible>
           <constraints><allowempty>true</allowempty></constraints>
           <control type="edit" format="string"/>
-        </setting>
-        <!-- Kept defined, hidden and empty so the 0.24 migration can clear
-             the plaintext password a previous version stored here.
-             setSetting() on an id settings.xml does not declare is ignored. -->
-        <setting id="username" type="string">
-          <level>0</level><default></default><visible>false</visible>
-          <constraints><allowempty>true</allowempty></constraints>
-          <control type="edit" format="string"/>
-        </setting>
-        <setting id="password" type="string">
-          <level>0</level><default></default><visible>false</visible>
-          <constraints><allowempty>true</allowempty></constraints>
-          <control type="edit" format="string"><hidden>true</hidden></control>
         </setting>
       </group>
     </category>

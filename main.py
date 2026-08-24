@@ -17,7 +17,6 @@ import xbmcvfs
 
 import abs_auth
 import abs_http
-import migrate
 from abs_api import ABSClient
 
 # ── Plugin bootstrap ──
@@ -59,7 +58,6 @@ def get_client(prompt=True):
     on every listing whose result was thrown away. An expired token announces
     itself on the next real request, and ABSClient answers it with a refresh.
     """
-    migrate.run_migrations(ADDON, PROFILE_DIR)
     creds = abs_auth.Credentials(ADDON)
     if not creds.has_credentials:
         if prompt:
@@ -123,6 +121,14 @@ ICON_SORT = os.path.join(ICON_DIR, "sort.png")
 ICON_NEXT = os.path.join(ICON_DIR, "navigate_next.png")
 ICON_LOGIN = os.path.join(ICON_DIR, "login.png")
 
+# The add-on's own backdrop. Declared in addon.xml <assets> too, which is what
+# the add-on browser shows — but a skin draws the background of a *listing*
+# from the focused item's art, so menu rows have to carry it themselves or
+# there is simply nothing there.
+FANART = os.path.join(
+    xbmcvfs.translatePath(ADDON.getAddonInfo("path")), "resources", "fanart.jpg"
+)
+
 # Shown for an item whose cover the server does not have.
 FALLBACK_COVER = os.path.join(
     xbmcvfs.translatePath(ADDON.getAddonInfo("path")), "resources", "ABS-Default.png"
@@ -174,8 +180,11 @@ def _cover_art(client, item, item_id=None):
 
 def set_icon(li, icon):
     """Set both icon and thumb: views differ in which one they draw."""
+    art = {"fanart": FANART}
     if icon:
-        li.setArt({"icon": icon, "thumb": icon})
+        art["icon"] = icon
+        art["thumb"] = icon
+    li.setArt(art)
 
 
 def add_directory(label, icon=None, **kwargs):

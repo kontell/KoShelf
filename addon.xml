@@ -22,7 +22,7 @@
     <summary lang="en">AudioBookShelf client with tempo</summary>
     <description lang="en">Browse and play audiobooks and podcasts from your AudioBookShelf server, at whatever speed you like. Playback speed is adjustable per book with pitch correction, progress syncs back to the server, and a sleep timer fades out and stops on its own.</description>
     <license>MIT</license>
-    <news>v1.0.0 Koshelf is now Kotome. The add-on id changed, so Kodi installs it as a new add-on: your server, sign-in and per-book speeds are carried over automatically the first time it runs, and the old Koshelf entry can be uninstalled once you have checked it worked. Nothing else changed in this release.</news>
+    <news>v1.0.0 First release as Kotome. This add-on was previously called Koshelf, which is no longer maintained — Kotome installs separately and starts fresh, so sign in and set your preferences once. Uninstall Koshelf whenever you like. Highlights since the last Koshelf release: browsing is around ten times faster, the sort menu works, in-progress books show a real resume point, folders have icons, and your password is no longer stored.</news>
     <assets>
       <icon>resources/icon.png</icon>
       <fanart>resources/fanart.jpg</fanart>
