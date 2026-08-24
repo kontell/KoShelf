@@ -355,16 +355,32 @@ def _set_resume(tag, info, progress):
 # is (display label, ABS sort key, desc, media_type restriction). Kodi's
 # own SORT_METHOD_* only reorders the current page; to sort across pages
 # we ask ABS for a pre-sorted page.
+# Sort keys AudioBookShelf actually honours, from getOrder() in
+# server/utils/queries/libraryItemsBookFilters.js. Anything not in that
+# function's if/else chain falls through to `return []` — no ORDER BY at all —
+# so the server answers 200 with rows in whatever order the database felt like
+# and nothing anywhere says the sort was ignored.
+#
+# That is not hypothetical: media.metadata.titleIgnorePrefix was the default
+# here and is not a key. "Title (A-Z)" returned a jumble. Prefix handling is
+# the server's own sortingIgnorePrefix setting applied inside getTitleOrder(),
+# not something a client selects.
+#
+# Verified against a live 2.36.0 by comparing each key's first page against a
+# deliberate nonsense key; anything matching the nonsense ordering was being
+# ignored. media.metadata.narratorName, media.metadata.seriesName and
+# updatedAt all failed that check and are gone.
+#
+# Each entry is (display label, ABS sort key, desc, media_type restriction).
 _SORT_OPTIONS = (
-    ("Title (A-Z)", "media.metadata.titleIgnorePrefix", False, "both"),
-    ("Title (Z-A)", "media.metadata.titleIgnorePrefix", True, "both"),
+    ("Title (A-Z)", "media.metadata.title", False, "both"),
+    ("Title (Z-A)", "media.metadata.title", True, "both"),
     ("Author (A-Z)", "media.metadata.authorNameLF", False, "book"),
     ("Author (Z-A)", "media.metadata.authorNameLF", True, "book"),
-    ("Narrator (A-Z)", "media.metadata.narratorName", False, "book"),
-    ("Series", "media.metadata.seriesName", False, "book"),
+    ("Recently listened", "progress", True, "both"),
     ("Recently added", "addedAt", True, "both"),
     ("Oldest added", "addedAt", False, "both"),
-    ("Recently updated", "updatedAt", True, "both"),
+    ("Recently changed on disk", "mtimeMs", True, "both"),
     ("Duration (shortest)", "media.duration", False, "book"),
     ("Duration (longest)", "media.duration", True, "book"),
     ("Published year (new)", "media.metadata.publishedYear", True, "book"),
@@ -372,7 +388,7 @@ _SORT_OPTIONS = (
     ("Size (largest)", "size", True, "both"),
     ("Random", "random", False, "both"),
 )
-_DEFAULT_SORT = "media.metadata.titleIgnorePrefix"
+_DEFAULT_SORT = "media.metadata.title"
 
 
 def _sort_label(sort_key, desc):
