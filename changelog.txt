@@ -1,3 +1,13 @@
+v1.0.1
+- Fix: "All Books" said "Title (A-Z)" and showed a jumble. The default sort
+  key was one AudioBookShelf does not have, and an unknown key makes the
+  server return rows in no order at all rather than reporting a problem.
+- Fix: three more sort options were silently doing nothing for the same
+  reason. Narrator and Series are removed — the server has no key for
+  either — and "Recently updated" is now "Recently changed on disk", which
+  is what it actually sorts by.
+- New sort: "Recently listened".
+
 Kotome 1.0.0 is the first release under this name. It was previously called
 Koshelf (plugin.audio.koshelf), which is no longer maintained. Kotome
 installs as a separate add-on and carries nothing over, so sign in once and
