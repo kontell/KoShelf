@@ -86,6 +86,10 @@ Kotome also sets `inputstream.tempo.start_time` (seconds). The C++ addon uses it
 
 **Icons** are Kodi's own `Default*.png` names wherever one fits, because they resolve out of whichever skin is running and so match the user's theme. Check a candidate against a real skin before using it: `DefaultAddonAudio.png` draws a clapperboard and `DefaultTVShows.png` draws a television. Only what Kodi has no icon for is bundled, in `resources/icons/`, from Material Symbols via `tools/make-icons.py`.
 
+A bundled icon has to be padded to match. Kodi's Default icons put the glyph at ~52% of the canvas on its larger dimension; a Material Symbol rendered straight to PNG fills 75–92% and reads as oversized next to them. `make-icons.py` crops to the ink and re-centres at `GLYPH_RATIO`, so the source SVG's own padding stops mattering.
+
+**`ReloadSkin()` before believing a screenshot of an icon change.** Kodi's texture manager holds loaded textures in memory for the session, and an add-on disable/enable bounce does not touch them — the list redraws with the *old* images, identical to the pixel, with nothing logged. Measuring that stale frame once produced a "the change did nothing" reading and a recalibration in the wrong direction. The texture *cache* (`Textures13.db`) is a separate thing and was not involved; `Textures.GetTextures` showed these files were never in it.
+
 ## Speed control
 
 Speed settings (step, min, max) are written as JSON to `special://temp/inputstream_tempo_config.<OWNER>`. inputstream.tempo's `speed.py` reads this for keyboard/dialog stepping. Per-book speeds are stored in `speeds.json` in the addon profile.

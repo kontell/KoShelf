@@ -9,12 +9,20 @@ match their theme. These are only for the handful Kodi has no icon for.
 Material Symbols are Apache-2.0. Icons downloaded from fonts.google.com keep
 their original file name in tools/ as provenance; the rest are inlined below
 because a single path is not worth a file.
+
+Every icon is normalised to the same proportion Kodi's own Default*.png use,
+so a bundled icon does not sit noticeably larger than a skin one beside it in
+the same list. Measured across nine of Contuary's Default icons, the glyph's
+larger dimension averages 52% of the canvas; a Material Symbol rendered
+straight to PNG lands at 75-92%, which reads as oversized.
 """
 
 import pathlib
 import re
 import subprocess
 import sys
+
+from PIL import Image
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TOOLS = ROOT / "tools"
@@ -42,11 +50,25 @@ FROM_FILE = {
 }
 
 SIZE = 256
+# Kodi's own Default*.png put the glyph at ~52% of the canvas on its larger
+# dimension, averaged over nine of them. Matching that is what stops a bundled
+# icon sitting noticeably larger than a skin one beside it: measured in the
+# rendered list, 0.52 gives ~21px against the skin's 20-22px, where a Material
+# Symbol rendered straight to PNG (75-92%) gave 29-31px.
+#
+# If you change this, ReloadSkin() before believing a screenshot. Kodi holds
+# loaded textures in memory for the session, so an add-on disable/enable
+# bounce redraws the list with the *old* images and nothing says so.
+GLYPH_RATIO = 0.52
+# Render larger than SIZE first: the glyph is then downscaled into place, so
+# the edges stay clean instead of being resampled up.
+RENDER_SIZE = SIZE * 3
 
 
 def render(name, svg_text):
     DEST.mkdir(parents=True, exist_ok=True)
     tmp = DEST / (name + ".svg")
+    raw = DEST / (name + ".raw.png")
     tmp.write_text(svg_text)
     try:
         subprocess.run(
@@ -55,18 +77,55 @@ def render(name, svg_text):
                 str(tmp),
                 "--export-type=png",
                 "-w",
-                str(SIZE),
+                str(RENDER_SIZE),
                 "-h",
-                str(SIZE),
-                "--export-filename={}".format(DEST / (name + ".png")),
+                str(RENDER_SIZE),
+                "--export-filename={}".format(raw),
             ],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        _normalise(raw, DEST / (name + ".png"))
     finally:
         tmp.unlink(missing_ok=True)
-    print("  {:<16} {:>6} bytes".format(name, (DEST / (name + ".png")).stat().st_size))
+        raw.unlink(missing_ok=True)
+    out = DEST / (name + ".png")
+    print("  {:<16} {:>6} bytes  {}".format(name, out.stat().st_size, _describe(out)))
+
+
+def _normalise(source, target):
+    """Crop to the glyph, scale it to GLYPH_RATIO, centre it on a SIZE canvas.
+
+    Cropping first means the source SVG's own padding — which differs between
+    a downloaded icon and an inlined path — stops mattering. What is measured
+    is the ink, which is what the eye compares.
+    """
+    image = Image.open(source).convert("RGBA")
+    bbox = image.getchannel("A").getbbox()
+    if bbox is None:
+        image.resize((SIZE, SIZE), Image.LANCZOS).save(target)
+        return
+    glyph = image.crop(bbox)
+    longest = max(glyph.size)
+    scale = (SIZE * GLYPH_RATIO) / longest
+    glyph = glyph.resize(
+        (max(1, round(glyph.width * scale)), max(1, round(glyph.height * scale))),
+        Image.LANCZOS,
+    )
+    canvas = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
+    canvas.paste(glyph, ((SIZE - glyph.width) // 2, (SIZE - glyph.height) // 2), glyph)
+    canvas.save(target)
+
+
+def _describe(path):
+    image = Image.open(path).convert("RGBA")
+    bbox = image.getchannel("A").getbbox()
+    if bbox is None:
+        return "empty"
+    return "glyph {}% x {}%".format(
+        round((bbox[2] - bbox[0]) / SIZE * 100), round((bbox[3] - bbox[1]) / SIZE * 100)
+    )
 
 
 def main():
