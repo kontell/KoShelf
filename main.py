@@ -1048,9 +1048,14 @@ PROFILE_DIR = xbmcvfs.translatePath(ADDON.getAddonInfo("profile"))
 SESSION_FILE = os.path.join(PROFILE_DIR, "session.json")
 SPEEDS_FILE = os.path.join(PROFILE_DIR, "speeds.json")
 SLEEP_FILE = os.path.join(PROFILE_DIR, "sleep_timer")
-# Standardised files shared with inputstream.tempo
-TEMPO_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo")
-CONFIG_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo_config")
+# Our own rate and config files, named in the sentinel so inputstream.tempo's
+# keymap acts on ours and not on another add-on's. A patched YouTube drives
+# the same add-on; on the shared paths an audiobook at 2.0x and a video at
+# 1.5x overwrote each other's rate.
+OWNER = "plugin.audio.koshelf"
+TEMPO_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo." + OWNER)
+CONFIG_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo_config." + OWNER)
+# The sentinel stays shared: it is the single "the keys are live" flag.
 ACTIVE_FILE = xbmcvfs.translatePath("special://temp/inputstream_tempo_active")
 
 
@@ -1091,9 +1096,15 @@ def _get_tempo(media_type="book"):
 
 
 def _write_tempo(tempo):
-    """Write tempo value to the shared inputstream.tempo file."""
-    with open(TEMPO_FILE, "w") as f:
+    """Write tempo value to our inputstream.tempo rate file.
+
+    Atomically — the add-on polls it every 250 ms and would otherwise be
+    able to read a half-written value.
+    """
+    tmp = TEMPO_FILE + ".tmp"
+    with open(tmp, "w") as f:
         f.write(str(tempo))
+    os.replace(tmp, TEMPO_FILE)
 
 
 def _write_config_file():
@@ -1202,11 +1213,16 @@ def _resolve_playback(client, item_id, episode_id=None):
     tempo = round(_clamp(raw_tempo, lo, hi), 2)
     _write_tempo(tempo)
     _write_config_file()
-    # Sentinel — tells inputstream.tempo keys/dialog they can act. Service
-    # clears this on playback stop, so non-tempo playback gets a no-op.
+    # Sentinel — tells inputstream.tempo keys/dialog they can act, and which
+    # files to act on. Service clears this on playback stop, so non-tempo
+    # playback gets a no-op.
     try:
         with open(ACTIVE_FILE, "w") as f:
-            f.write(item_id)
+            f.write(
+                "addon={}\ntempo_file={}\nconfig_file={}\n".format(
+                    OWNER, TEMPO_FILE, CONFIG_FILE
+                )
+            )
     except IOError:
         pass
 
