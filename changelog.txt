@@ -1,3 +1,23 @@
+v1.0.2
+- New: "Hide watched" on the context menu. It is on every item, applies to
+  every listing, and stays set until you turn it off again.
+- New: "Mark as played" / "Mark as unplayed" and "Reset resume position" on
+  the context menu. Both act on AudioBookShelf, not on Kodi's own database,
+  so the change follows you to your other devices.
+- Fix: the sleep timer flashed the screen back up as it stopped playback,
+  so you were left looking at a lit UI at the moment it was meant to go
+  dark.
+- Fix: the server address is now greyed out while you are signed in.
+  Editing it would have pointed your stored tokens at a server that never
+  issued them. Sign out to change it.
+- Settings: General is the first tab, and it is one flat list — the group
+  headings and the separator between them are gone.
+
+Finished books still do not show a watched tick. Kodi draws that overlay
+only for items in its own library, and add-on items are not in it. Books
+you are part-way through are unaffected — those come from the resume
+point, which Kodi does honour.
+
 v1.0.1
 - Fix: "All Books" said "Title (A-Z)" and showed a jumble. The default sort
   key was one AudioBookShelf does not have, and an unknown key makes the
