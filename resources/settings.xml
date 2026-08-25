@@ -137,6 +137,10 @@
           <constraints><allowempty>true</allowempty></constraints>
           <control type="edit" format="string"/>
         </setting>
+        <setting id="hide_watched" type="boolean">
+          <level>0</level><default>false</default><visible>false</visible>
+          <control type="toggle"/>
+        </setting>
         <setting id="device_id" type="string">
           <level>0</level><default></default><visible>false</visible>
           <constraints><allowempty>true</allowempty></constraints>

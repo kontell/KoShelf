@@ -7,6 +7,7 @@ import sys
 import json
 import time
 from html.parser import HTMLParser
+from base64 import b64encode
 from urllib.parse import urlencode, parse_qs, urlsplit
 
 import xbmc
@@ -389,6 +390,11 @@ _SORT_OPTIONS = (
     ("Random", "random", False, "both"),
 )
 _DEFAULT_SORT = "media.metadata.title"
+
+# ABS filters are "<group>.<base64 of the value>". progress/not-finished is
+# the complement of progress/finished — checked against a live 2.36.0, where
+# the two totalled the unfiltered count exactly (98 + 47 = 145).
+NOT_FINISHED_FILTER = "progress." + b64encode(b"not-finished").decode()
 
 
 def _sort_label(sort_key, desc):
@@ -826,6 +832,12 @@ def _refresh_after_change():
     xbmc.executebuiltin("Container.Refresh")
 
 
+def route_toggle_hide_watched(on):
+    ADDON.setSetting("hide_watched", "true" if on else "false")
+    _notify("Hiding watched items" if on else "Showing watched items")
+    _refresh_after_change()
+
+
 def route_mark_played(client, item_id, episode_id, played):
     ok = client.set_finished(item_id, episode_id=episode_id, finished=played)
     if ok is None:
@@ -979,8 +991,17 @@ def route_library_items(client, library_id, media_type, page=0, sort=None, desc=
     """Paginated list of items in a library, sorted server-side."""
     limit = _get_page_limit()
     sort = sort or _DEFAULT_SORT
+    # Server-side, not a client-side skip: ABS reports `total` for the filtered
+    # set, so the page count and the "Next page" row stay correct. Filtering
+    # after the fact would leave short pages and a total that counts rows the
+    # user cannot see.
     data = client.get_library_items(
-        library_id, page=page, limit=limit, sort=sort, desc=desc
+        library_id,
+        page=page,
+        limit=limit,
+        sort=sort,
+        desc=desc,
+        filter_str=NOT_FINISHED_FILTER if hide_watched() else None,
     )
     if not data:
         xbmcplugin.endOfDirectory(HANDLE)
@@ -1026,6 +1047,20 @@ def route_library_items(client, library_id, media_type, page=0, sort=None, desc=
     xbmcplugin.endOfDirectory(HANDLE)
 
 
+def hide_watched():
+    return ADDON.getSetting("hide_watched") == "true"
+
+
+def _hide_watched_context_item():
+    on = hide_watched()
+    return (
+        "Show watched" if on else "Hide watched",
+        "RunPlugin({})".format(
+            build_url(action="toggle_hide_watched", on="0" if on else "1")
+        ),
+    )
+
+
 def _abs_context_items(item_id, episode_id=None, finished=False, progress=None):
     """Mark (un)played and Reset resume, as RunPlugin context entries.
 
@@ -1044,6 +1079,7 @@ def _abs_context_items(item_id, episode_id=None, finished=False, progress=None):
             ),
         )
     ]
+    items.append(_hide_watched_context_item())
     progress_id = (progress or {}).get("id")
     if not finished and progress_id:
         items.append(
@@ -1110,6 +1146,10 @@ def _add_library_item(
     title = meta.get("title", "Unknown")
     art = _cover_art(client, item)
     progress = (progress_map or {}).get(item["id"]) if progress_map else None
+    # Series, author and collection listings already spend the single filter
+    # ABS allows on the series/author itself, so this one is client-side.
+    if hide_watched() and (progress or {}).get("isFinished"):
+        return
 
     if media_type == "podcast":
         num_eps = media.get("numEpisodes", 0)
@@ -1201,8 +1241,6 @@ def route_series_list(client, library_id, page=0):
 
 def route_series_detail(client, library_id, series_id):
     """Show books in a series (filter library items by series ID)."""
-    from base64 import b64encode
-
     filter_str = "series." + b64encode(series_id.encode()).decode()
     data = client.get_library_items(library_id, limit=100, filter_str=filter_str)
     if data:
@@ -1249,8 +1287,6 @@ def route_authors_list(client, library_id):
 
 def route_author_books(client, library_id, author_id, author_name):
     """Show books by a specific author (filter library items by author ID)."""
-    from base64 import b64encode
-
     filter_str = "authors." + b64encode(author_id.encode()).decode()
     data = client.get_library_items(library_id, limit=100, filter_str=filter_str)
     if data:
@@ -1312,6 +1348,8 @@ def route_podcast_episodes(client, item_id, library_id):
         ep_title = ep.get("title", "Unknown Episode")
         duration = ep.get("audioFile", {}).get("duration", 0)
         ep_progress = progress_map.get("{}-{}".format(item_id, ep_id))
+        if hide_watched() and (ep_progress or {}).get("isFinished"):
+            continue
 
         art = podcast_art
         info = {
@@ -1354,6 +1392,8 @@ def route_recent_episodes(client, library_id):
         podcast_title = ep.get("audioFile", {}).get("metaTags", {}).get("tagAlbum", "")
         duration = ep.get("audioFile", {}).get("duration", 0)
         ep_progress = progress_map.get("{}-{}".format(item_id, ep_id))
+        if hide_watched() and (ep_progress or {}).get("isFinished"):
+            continue
 
         # The podcast name still leads the label here: this listing mixes
         # shows, so the episode title alone is not enough to tell them apart.
@@ -1749,6 +1789,8 @@ def router():
         route_play_book(client, args["item_id"])
     elif action == "play_episode":
         route_play_episode(client, args["item_id"], args["episode_id"])
+    elif action == "toggle_hide_watched":
+        route_toggle_hide_watched(args.get("on") == "1")
     elif action == "mark_played":
         route_mark_played(
             client,
