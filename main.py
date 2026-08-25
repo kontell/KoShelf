@@ -429,6 +429,21 @@ _NAME_SORTS = (
 CONTENT_MENU = ""
 
 
+# Media listings stay on a music content type. Switching to "musicvideos" was
+# tried to get Kodi's watched overlay, which it derives from playcount for
+# video content — it does not work here. Kodi synthesises that overlay from
+# its own library, and these items are not in it: measured with
+# content="musicvideos" on a finished episode, ListItem.PlayCount read "1"
+# and ListItem.Overlay was still empty. The change also added Kodi's own
+# "Mark as watched" to the context menu, which writes to Kodi's database
+# rather than to AudioBookShelf and so sat next to ours saying the same thing
+# and meaning something else.
+#
+# playcount is still set: it is true, it costs nothing, and a skin that reads
+# ListItem.PlayCount can use it. The resume point is what Kodi does render
+# for a plugin item, and that works.
+
+
 def _apply_sorts(methods, content="albums"):
     """Set content type and register the listed sort methods (first = default)."""
     xbmcplugin.setContent(HANDLE, content)
@@ -806,6 +821,28 @@ def route_test_connection():
     xbmcgui.Dialog().ok("Kotome", message)
 
 
+def _refresh_after_change():
+    invalidate_progress_cache()
+    xbmc.executebuiltin("Container.Refresh")
+
+
+def route_mark_played(client, item_id, episode_id, played):
+    ok = client.set_finished(item_id, episode_id=episode_id, finished=played)
+    if ok is None:
+        _notify("Could not reach the server")
+        return
+    _notify("Marked as played" if played else "Marked as unplayed")
+    _refresh_after_change()
+
+
+def route_reset_progress(client, progress_id):
+    if client.clear_progress(progress_id) is None:
+        _notify("Could not reach the server")
+        return
+    _notify("Resume position reset")
+    _refresh_after_change()
+
+
 def route_continue_listening(client):
     """Show items currently in progress - books and individual podcast episodes."""
     items = client.get_items_in_progress()
@@ -847,7 +884,17 @@ def route_continue_listening(client):
                 action="play_episode", item_id=item_id, episode_id=ep_id
             )
             add_playable(
-                display_title, play_url, art=art, info=info, progress=ep_progress
+                display_title,
+                play_url,
+                art=art,
+                info=info,
+                progress=ep_progress,
+                context=_abs_context_items(
+                    item_id,
+                    ep_id,
+                    bool((ep_progress or {}).get("isFinished")),
+                    ep_progress,
+                ),
             )
         else:
             # Book — skip ebook-only items (no audio)
@@ -869,7 +916,16 @@ def route_continue_listening(client):
             }
             play_url = build_url(action="play_book", item_id=item_id)
             add_playable(
-                display_title, play_url, art=art, info=info, progress=item_progress
+                display_title,
+                play_url,
+                art=art,
+                info=info,
+                progress=item_progress,
+                context=_abs_context_items(
+                    item_id,
+                    finished=bool((item_progress or {}).get("isFinished")),
+                    progress=item_progress,
+                ),
             )
 
     # ABS returns these last-played first, which is the order that makes
@@ -970,6 +1026,37 @@ def route_library_items(client, library_id, media_type, page=0, sort=None, desc=
     xbmcplugin.endOfDirectory(HANDLE)
 
 
+def _abs_context_items(item_id, episode_id=None, finished=False, progress=None):
+    """Mark (un)played and Reset resume, as RunPlugin context entries.
+
+    RunPlugin rather than a directory route: these act and return, and a
+    route that returns no listing must not be reachable as one.
+    """
+    args = {"item_id": item_id}
+    if episode_id:
+        args["episode_id"] = episode_id
+    label = "Mark as unplayed" if finished else "Mark as played"
+    items = [
+        (
+            label,
+            "RunPlugin({})".format(
+                build_url(action="mark_played", played="0" if finished else "1", **args)
+            ),
+        )
+    ]
+    progress_id = (progress or {}).get("id")
+    if not finished and progress_id:
+        items.append(
+            (
+                "Reset resume position",
+                "RunPlugin({})".format(
+                    build_url(action="reset_progress", progress_id=progress_id)
+                ),
+            )
+        )
+    return items
+
+
 def _sort_context_item(library_id, media_type, sort, desc):
     """('Sort: Recently added', RunPlugin(...)) for a listing's context menu."""
     return (
@@ -1066,7 +1153,17 @@ def _add_library_item(
         }
         play_url = build_url(action="play_book", item_id=item["id"])
         add_playable(
-            title, play_url, art=art, info=info, progress=progress, context=context
+            title,
+            play_url,
+            art=art,
+            info=info,
+            progress=progress,
+            context=(context or [])
+            + _abs_context_items(
+                item["id"],
+                finished=bool((progress or {}).get("isFinished")),
+                progress=progress,
+            ),
         )
 
 
@@ -1225,7 +1322,16 @@ def route_podcast_episodes(client, item_id, library_id):
             "last_played": (ep_progress or {}).get("lastUpdate"),
         }
         play_url = build_url(action="play_episode", item_id=item_id, episode_id=ep_id)
-        add_playable(ep_title, play_url, art=art, info=info, progress=ep_progress)
+        add_playable(
+            ep_title,
+            play_url,
+            art=art,
+            info=info,
+            progress=ep_progress,
+            context=_abs_context_items(
+                item_id, ep_id, bool((ep_progress or {}).get("isFinished")), ep_progress
+            ),
+        )
 
     # Already sorted newest-first above; UNSORTED keeps that as the default.
     _apply_sorts(_EPISODE_SORTS)
@@ -1265,7 +1371,16 @@ def route_recent_episodes(client, library_id):
             "last_played": (ep_progress or {}).get("lastUpdate"),
         }
         play_url = build_url(action="play_episode", item_id=item_id, episode_id=ep_id)
-        add_playable(label, play_url, art=art, info=info, progress=ep_progress)
+        add_playable(
+            label,
+            play_url,
+            art=art,
+            info=info,
+            progress=ep_progress,
+            context=_abs_context_items(
+                item_id, ep_id, bool((ep_progress or {}).get("isFinished")), ep_progress
+            ),
+        )
 
     _apply_sorts(_EPISODE_SORTS)
     xbmcplugin.endOfDirectory(HANDLE)
@@ -1634,6 +1749,15 @@ def router():
         route_play_book(client, args["item_id"])
     elif action == "play_episode":
         route_play_episode(client, args["item_id"], args["episode_id"])
+    elif action == "mark_played":
+        route_mark_played(
+            client,
+            args["item_id"],
+            args.get("episode_id"),
+            args.get("played") == "1",
+        )
+    elif action == "reset_progress":
+        route_reset_progress(client, args["progress_id"])
     elif action == "settings":
         route_settings()
     elif action == "speed_dialog":

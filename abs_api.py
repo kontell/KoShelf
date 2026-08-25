@@ -117,6 +117,9 @@ class ABSClient:
     def _post(self, path, json=None, headers=None):
         return self._request("POST", path, json_body=json or {}, headers=headers)
 
+    def _delete(self, path):
+        return self._request("DELETE", path)
+
     def _patch(self, path, json=None):
         return self._request("PATCH", path, json_body=json or {})
 
@@ -266,6 +269,24 @@ class ABSClient:
                 "isFinished": is_finished,
             },
         )
+
+    def set_finished(self, item_id, episode_id=None, finished=True):
+        """Mark an item played or unplayed on the server."""
+        path = "/api/me/progress/{}".format(item_id)
+        if episode_id:
+            path += "/" + episode_id
+        return self._patch(path, json={"isFinished": bool(finished)})
+
+    def clear_progress(self, progress_id):
+        """Forget a resume position entirely, server-side.
+
+        Takes the mediaProgress record's own id, not the library item's.
+        ApiRouter registers this as delete('/me/progress/:id') with no
+        episode segment — unlike the GET and PATCH beside it, which are
+        ':libraryItemId/:episodeId?'. Passing an item/episode pair here does
+        not match the route.
+        """
+        return self._delete("/api/me/progress/{}".format(progress_id))
 
     # ── URLs ──
 
