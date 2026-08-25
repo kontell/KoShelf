@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="plugin.audio.kotome"
        name="Kotome"
-       version="1.0.1"
+       version="1.0.2"
        provider-name="kontell">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
@@ -22,7 +22,7 @@
     <summary lang="en">AudioBookShelf client with tempo</summary>
     <description lang="en">Browse and play audiobooks and podcasts from your AudioBookShelf server, at whatever speed you like. Playback speed is adjustable per book with pitch correction, progress syncs back to the server, and a sleep timer fades out and stops on its own.</description>
     <license>MIT</license>
-    <news>v1.0.1 Sorting fix. "All Books" claimed to be sorted by title and was not: the default sort key was one AudioBookShelf does not recognise, and an unknown key makes the server return rows in no order rather than reporting a problem. Three other sort options were silently doing nothing for the same reason; Narrator and Series are gone (there is no key for either) and "Recently updated" is now "Recently changed on disk". Added "Recently listened".</news>
+    <news>v1.0.2 Hide watched. A new context-menu toggle hides finished books and episodes from every listing, alongside new Mark as played / unplayed and Reset resume position actions that act on AudioBookShelf itself. Fixes: the sleep timer no longer flashes the screen back up as it stops playback, and the server address is greyed out while you are signed in, so stored tokens cannot be pointed at a server that never issued them. Settings: General is the first tab, and it is one flat list.</news>
     <assets>
       <icon>resources/icon.png</icon>
       <fanart>resources/fanart.jpg</fanart>

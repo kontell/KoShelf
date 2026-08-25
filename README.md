@@ -23,6 +23,9 @@ control, resume across devices, and per-book playback speed memory.
   beginning.
 - Sorting is done by the server, so it covers the whole library rather than
   the page on screen. The picker is on the context menu of any item.
+- The context menu also carries Hide watched, Mark as played / unplayed,
+  and Reset resume position. These act on AudioBookShelf rather than on
+  Kodi's own database, so the change follows you to your other devices.
 - Sleep timer, with a volume fade-out and an optional screen action. It stops
   playback and leaves the screen dark, then puts your screensaver settings
   back when you return.

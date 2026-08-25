@@ -460,6 +460,13 @@ class SleepModeController:
             _jsonrpc("Application.SetVolume", {"volume": int(self.original_volume)})
 
         if self._screen_action_fired and self._screen_action in _SAVER_FOR_ACTION:
+            # Re-arm before returning, not on the next poll. Stopping playback
+            # drops the screensaver, and the loop's 0.25 s tick plus the
+            # caching teardown was long enough to show the UI again — a
+            # visible flash of light at the exact moment the user is being
+            # left in the dark. Reported on a Bravia.
+            if not xbmc.getCondVisibility("System.ScreenSaverActive"):
+                xbmc.executebuiltin("ActivateScreenSaver")
             # Leave the screen dark. The user is asleep; restoring
             # screensaver.mode now would deactivate the screensaver and light
             # the room back up, which is the opposite of what they asked for.
@@ -467,6 +474,8 @@ class SleepModeController:
             # see await_wake() — and sleep_state.json stays on disk until then
             # so a Kodi killed overnight still recovers them on next start.
             self._awaiting_wake = True
+            # Still armed: player.stop() can complete after this point, and
+            # the drop that follows it is what the poll catches.
             self._redarken_pending = True
             self._wake_polls = 0
             xbmc.log(
