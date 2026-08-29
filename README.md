@@ -39,14 +39,11 @@ control, resume across devices, and per-book playback speed memory.
 
 - **Sleep timer → Screen action.** The screensaver options borrow Kodi's own
   screensaver and hand your settings back afterwards. *Turn the display off*
-  uses DPMS, which only exists on Linux/X11 — on Android the screensaver is
+  uses DPMS, which only exists on Linux/X11 — on deviceid the screensaver is
   used instead.
 - **General → Verify HTTPS certificate.** Turn this off only for a server
-  behind a self-signed certificate.
+  behind a self-signed certificathi
 - **Playback → Remember speed per book/podcast.** On by default.
-
-Kotome ships fan art, but some skins hide add-on backdrops entirely — in
-Contuary it is the *No fanart* setting.
 
 ## Supported platforms
 
@@ -57,21 +54,6 @@ Contuary it is the *No fanart* setting.
 | Linux aarch64 (Pi 3+) | yes | yes |
 | Android ARM32 | yes | yes |
 | Android ARM64 | yes | yes |
-
-Playback uses Kodi's VideoPlayer. The PAPlayer option earlier versions offered
-is gone — it never worked without Kodi patches.
-
-## Building
-
-```bash
-tox                     # what CI gates on: black, compileall
-tools/build.py [OUTDIR] # Kodi-installable zip (default ./dist)
-tools/dev-install.sh    # rsync into ~/.kodi/addons and bounce the service
-```
-
-`CLAUDE.md` carries the implementation notes — how the sleep timer borrows
-Kodi's screensaver, why interpreter reuse constrains the routing, the
-AudioBookShelf token model, and the Kodi behaviours that cost time to find.
 
 ## Licence
 
