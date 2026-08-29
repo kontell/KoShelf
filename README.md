@@ -4,11 +4,6 @@ Kodi client for [AudioBookShelf](https://www.audiobookshelf.org/). Browse and
 play audiobooks and podcasts from your ABS server with pitch-corrected tempo
 control, resume across devices, and per-book playback speed memory.
 
-> Kotome was called **Koshelf** until 1.0.0; the name collided with an
-> unrelated project. Koshelf is no longer maintained. Kodi treats the new id
-> as a separate add-on and nothing is carried across, so sign in once and set
-> your preferences — then uninstall Koshelf whenever you like.
-
 ## Features
 
 - Browse libraries, series, collections, authors, and podcasts from your ABS
